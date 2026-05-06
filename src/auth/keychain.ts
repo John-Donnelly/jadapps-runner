@@ -16,11 +16,24 @@ async function getAdapter(): Promise<KeychainAdapter | null> {
   if (adapter) return adapter;
   if (adapterError) return null;
   try {
-    const keytar = (await import("keytar")) as unknown as {
-      setPassword(s: string, a: string, p: string): Promise<void>;
-      getPassword(s: string, a: string): Promise<string | null>;
-      deletePassword(s: string, a: string): Promise<boolean>;
+    // keytar is CommonJS; under ESM we get { default: {...} } via Node's
+    // interop. Some bundlers expose the methods on the namespace directly,
+    // so try both shapes before giving up.
+    const mod = (await import("keytar")) as unknown as {
+      default?: KeytarShape;
+      setPassword?: KeytarShape["setPassword"];
+      getPassword?: KeytarShape["getPassword"];
+      deletePassword?: KeytarShape["deletePassword"];
     };
+    const keytar: KeytarShape | null =
+      typeof mod.setPassword === "function"
+        ? (mod as unknown as KeytarShape)
+        : mod.default && typeof mod.default.setPassword === "function"
+          ? mod.default
+          : null;
+    if (!keytar) {
+      throw new Error("keytar module loaded but exposes no setPassword");
+    }
     adapter = {
       setPassword: (account, value) => keytar.setPassword(SERVICE, account, value),
       getPassword: (account) => keytar.getPassword(SERVICE, account),
@@ -31,6 +44,12 @@ async function getAdapter(): Promise<KeychainAdapter | null> {
     adapterError = err as Error;
     return null;
   }
+}
+
+interface KeytarShape {
+  setPassword(s: string, a: string, p: string): Promise<void>;
+  getPassword(s: string, a: string): Promise<string | null>;
+  deletePassword(s: string, a: string): Promise<boolean>;
 }
 
 /**
