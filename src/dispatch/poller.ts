@@ -1,5 +1,5 @@
 import { request as undiciRequest } from "undici";
-import { writeFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { Logger } from "../log.js";
@@ -28,7 +28,17 @@ interface ClaimResponse {
     edges: Array<{ source: string; target: string; sourcePort?: string; targetPort?: string }>;
   };
   stepNodeIds?: string[];
+  /**
+   * If non-null, the runner should execute steps 0..pauseAtStep-1 from
+   * runToken.tools and then POST /pause with the last step's output as
+   * an inline artifact instead of /finalize. The browser orchestrator
+   * resumes from pauseAtStep onward.
+   */
+  pauseAtStep?: number | null;
+  pauseReason?: string | null;
 }
+
+const PAUSE_ARTIFACT_BYTE_CAP = 1 * 1024 * 1024;
 
 const POLL_BACKOFF_MS_NO_WORK = 10_000;
 const POLL_BACKOFF_MS_AFTER_WORK = 500;
@@ -212,6 +222,34 @@ export class DispatchPoller {
       }
     }
 
+    // Hybrid pause path: hand off to the browser if pauseAtStep was set
+    // and we ran our prefix successfully (no errors).
+    const allOk = stepResults.every((r) => r.ok);
+    if (
+      claim.pauseAtStep != null &&
+      allOk &&
+      stepResults.length > 0
+    ) {
+      const artifact = await buildPauseArtifact(pendingFileRef, scratchDir, log);
+      try {
+        await this.api.pauseRun(runId, runToken.jwt, {
+          pausedAtStep: claim.pauseAtStep,
+          durationMs: Date.now() - startedAt,
+          bytesProcessed: totalBytes,
+          artifact,
+        });
+        log.info(
+          { pauseAtStep: claim.pauseAtStep, hasArtifact: !!artifact, reason: claim.pauseReason },
+          "run paused for browser handoff",
+        );
+      } catch (err) {
+        log.warn({ err }, "pause failed");
+      } finally {
+        this.scratch.release(runId);
+      }
+      return;
+    }
+
     try {
       await this.api.finalizeRun(runId, runToken.jwt, {
         steps: stepResults,
@@ -224,10 +262,41 @@ export class DispatchPoller {
       this.scratch.release(runId);
     }
 
-    log.info({ ok: stepResults.every((r) => r.ok), steps: stepResults.length }, "run complete");
+    log.info({ ok: allOk, steps: stepResults.length }, "run complete");
   }
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Read the last step's output from scratch into an inline base64 artifact.
+ * Caps at 1MB; larger artifacts return null and the browser starts the
+ * resume from a fresh input (v0.2 will move them to Supabase Storage).
+ */
+async function buildPauseArtifact(
+  ref: { ref: string; bytes: number; sha256: string; mime: string; filename: string } | null,
+  scratchDir: string,
+  log: Logger,
+): Promise<{ base64: string; mime: string; filename: string } | null> {
+  if (!ref) return null;
+  if (ref.bytes > PAUSE_ARTIFACT_BYTE_CAP) {
+    log.warn(
+      { bytes: ref.bytes, cap: PAUSE_ARTIFACT_BYTE_CAP },
+      "pause artifact exceeds inline cap; browser will resume without it",
+    );
+    return null;
+  }
+  try {
+    const buf = await readFile(join(scratchDir, ref.ref));
+    return {
+      base64: buf.toString("base64"),
+      mime: ref.mime,
+      filename: ref.filename,
+    };
+  } catch (err) {
+    log.warn({ err }, "failed to read pause artifact from scratch");
+    return null;
+  }
 }

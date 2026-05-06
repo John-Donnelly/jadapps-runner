@@ -134,6 +134,29 @@ export class ApiClient {
     );
   }
 
+  /**
+   * Pause a hybrid run at the boundary between runner-bundled and
+   * browser-only steps. Inline artifact (≤1MB after base64 decode)
+   * carries the last successful step's output so the browser can
+   * resume execution from `pausedAtStep + 1`.
+   */
+  async pauseRun(
+    runId: string,
+    runToken: string,
+    body: {
+      pausedAtStep: number;
+      durationMs: number;
+      bytesProcessed: number;
+      artifact: { base64: string; mime: string; filename: string } | null;
+    },
+  ): Promise<void> {
+    await this.post(
+      `/api/orchestrator/runs/${encodeURIComponent(runId)}/pause`,
+      body,
+      runToken,
+    );
+  }
+
   /** Server-mediated execution path (runner-via-server). */
   async executeServerSide(step: StepDescriptor, runToken: string): Promise<StepResult> {
     return (await this.post("/api/orchestrator/steps/execute", step, runToken)) as StepResult;
