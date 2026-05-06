@@ -10,6 +10,10 @@ import { randomUUID } from "node:crypto";
 export class ScratchManager {
   constructor(private readonly base: string) {}
 
+  get basePath(): string {
+    return this.base;
+  }
+
   acquire(runId?: string): string {
     const id = runId ?? randomUUID();
     const dir = join(this.base, id);

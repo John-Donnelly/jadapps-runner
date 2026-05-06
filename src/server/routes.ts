@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { writeFile, stat } from "node:fs/promises";
+import { writeFile, stat, statfs } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import type { Executor } from "../runtime/executor.js";
@@ -85,6 +85,19 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
     pid: process.pid,
     queueDepth: 0,
   }));
+
+  app.get("/v1/disk", async (_req, reply) => {
+    try {
+      // node:fs/promises.statfs is Node 19+; runner requires 20.10+.
+      const st = await statfs(deps.scratch.basePath);
+      const free = Number(st.bavail) * Number(st.bsize);
+      const total = Number(st.blocks) * Number(st.bsize);
+      return { free, total, scratchDir: deps.scratch.basePath };
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message });
+      return;
+    }
+  });
 
   app.get("/v1/status", async () => {
     let access: Awaited<ReturnType<typeof deps.tokens.getAccessToken>> | null = null;
