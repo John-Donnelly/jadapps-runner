@@ -75,12 +75,28 @@ export class ApiClient {
     accessJwt: string,
     workflowId: string,
     estimatedBytes: number,
+    steps: Array<{ stepIndex: number; toolId: string }>,
   ): Promise<RunToken> {
-    return (await this.post(
+    const res = (await this.post(
       "/api/orchestrator/runs/preflight",
-      { workflowId, estimatedBytes },
+      { workflowId, estimatedBytes, steps },
       accessJwt,
-    )) as RunToken;
+    )) as {
+      runId: string;
+      jwt: string;
+      byteBudget: number;
+      expiresAt: number;
+      allowedRuntimes: RunToken["allowedRuntimes"];
+      tools: RunToken["tools"];
+    };
+    return {
+      runId: res.runId,
+      jwt: res.jwt,
+      byteBudget: res.byteBudget,
+      expiresAt: res.expiresAt,
+      allowedRuntimes: res.allowedRuntimes,
+      tools: res.tools,
+    };
   }
 
   async fetchBundle(bundleUrl: string, accessJwt: string): Promise<Buffer> {

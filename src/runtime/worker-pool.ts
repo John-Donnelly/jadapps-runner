@@ -18,17 +18,23 @@ interface SpawnOpts {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// In dev (tsx) we run worker.ts; built we run dist/runtime/worker.js
-const WORKER_ENTRY =
-  process.env.JADAPPS_RUNNER_DEV === "true"
-    ? join(__dirname, "worker.ts")
-    : join(__dirname, "worker.js");
+// In dev (tsx) we run worker.ts; built we run dist/runtime/worker.js. Tests
+// can override via the `workerEntry` constructor arg (or the env var) to
+// point at the built artifact when running from the source tree.
+function defaultWorkerEntry(): string {
+  if (process.env.JADAPPS_RUNNER_WORKER_ENTRY) return process.env.JADAPPS_RUNNER_WORKER_ENTRY;
+  if (process.env.JADAPPS_RUNNER_DEV === "true") return join(__dirname, "worker.ts");
+  return join(__dirname, "worker.js");
+}
 
 export class WorkerPool {
   /** Map workerId → Worker. A pool is per-tool (one worker reused across calls of the same tool). */
   private workers = new Map<string, { worker: Worker; pending: Map<string, PendingJob> }>();
+  private readonly workerEntry: string;
 
-  constructor(private readonly log: Logger) {}
+  constructor(private readonly log: Logger, workerEntry?: string) {
+    this.workerEntry = workerEntry ?? defaultWorkerEntry();
+  }
 
   async exec(
     opts: SpawnOpts,
@@ -40,7 +46,7 @@ export class WorkerPool {
     const key = `${opts.toolId}:${opts.modulePath}`;
     let entry = this.workers.get(key);
     if (!entry) {
-      const worker = new Worker(WORKER_ENTRY, {
+      const worker = new Worker(this.workerEntry, {
         workerData: opts,
         env: process.env,
       });
