@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import { randomBytes } from "node:crypto";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import type { Executor } from "../runtime/executor.js";
 import type { CredentialStore } from "../credentials/store.js";
 import type { TokenManager } from "../auth/tokens.js";
 import type { TelemetryClient } from "../telemetry/client.js";
+import type { ScratchManager } from "../runtime/scratch.js";
 
 const PAIRING_TOKEN_FILE = "pairing-token";
 
@@ -28,6 +30,7 @@ interface BootOptions {
   credentials: CredentialStore;
   tokens: TokenManager;
   telemetry: TelemetryClient;
+  scratch: ScratchManager;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -43,6 +46,13 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
   const app = Fastify({
     logger: false,
     bodyLimit: 32 * 1024 * 1024,
+  });
+
+  await app.register(multipart, {
+    limits: {
+      fileSize: 50 * 1024 * 1024 * 1024, // 50GB; runner has access to disk
+      files: 1,
+    },
   });
 
   await app.register(cors, {
@@ -62,6 +72,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     credentials: opts.credentials,
     tokens: opts.tokens,
     telemetry: opts.telemetry,
+    scratch: opts.scratch,
     log: opts.log,
     pairingToken,
   });

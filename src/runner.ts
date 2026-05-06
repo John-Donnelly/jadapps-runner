@@ -51,7 +51,7 @@ export async function startRunner(): Promise<Runner> {
 
   telemetry.start();
 
-  const server = await bootHttpServer({ cfg, log, executor, credentials, tokens, telemetry });
+  const server = await bootHttpServer({ cfg, log, executor, credentials, tokens, telemetry, scratch });
 
   const shutdown = makeShutdown(log, server, telemetry, workers, bundles);
   process.once("SIGINT", () => void shutdown());

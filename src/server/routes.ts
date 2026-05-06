@@ -1,9 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Executor } from "../runtime/executor.js";
 import type { CredentialStore } from "../credentials/store.js";
 import type { TokenManager } from "../auth/tokens.js";
 import type { TelemetryClient } from "../telemetry/client.js";
+import type { ScratchManager } from "../runtime/scratch.js";
 import type { Logger } from "../log.js";
 import type { RunToken, StepDescriptor } from "../types.js";
 
@@ -59,6 +63,7 @@ interface Deps {
   credentials: CredentialStore;
   tokens: TokenManager;
   telemetry: TelemetryClient;
+  scratch: ScratchManager;
   log: Logger;
   pairingToken: string;
 }
@@ -131,4 +136,41 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
     const ok = deps.credentials.delete(req.params.ref);
     return { ok };
   });
+
+  app.post<{ Params: { runId: string } }>(
+    "/v1/runs/:runId/files",
+    async (req, reply) => {
+      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(req.params.runId)) {
+        reply.code(400).send({ error: "invalid runId" });
+        return;
+      }
+      const part = await req.file().catch(() => null);
+      if (!part) {
+        reply.code(400).send({ error: "no file uploaded" });
+        return;
+      }
+      const buf = await part.toBuffer();
+      const sha = createHash("sha256").update(buf).digest("hex");
+      const safeName = (part.filename ?? "upload").replace(/[^a-zA-Z0-9_.-]/g, "_");
+      const ref = `${sha.slice(0, 16)}-${safeName}`;
+      const dir = deps.scratch.acquire(req.params.runId);
+      await writeFile(join(dir, ref), buf);
+      return {
+        ref,
+        bytes: buf.length,
+        sha256: sha,
+        mime: part.mimetype ?? "application/octet-stream",
+        filename: part.filename ?? "upload",
+      };
+    },
+  );
+
+  app.delete<{ Params: { runId: string } }>(
+    "/v1/runs/:runId",
+    async (req) => {
+      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(req.params.runId)) return { ok: false };
+      deps.scratch.release(req.params.runId);
+      return { ok: true };
+    },
+  );
 }
