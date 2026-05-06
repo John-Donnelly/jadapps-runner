@@ -1,0 +1,48 @@
+{
+  "name": "@jadapps/runner",
+  "version": "0.1.0",
+  "description": "Local execution runtime for JAD Apps. Native file processing, credential-scoped connectors, JWT-authenticated workflow execution.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "jadapps-runner": "./dist/cli.js"
+  },
+  "main": "./dist/runner.js",
+  "types": "./dist/runner.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src --ext .ts"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "commander": "^12.1.0",
+    "fastify": "^5.0.0",
+    "@fastify/cors": "^10.0.1",
+    "keytar": "^7.9.0",
+    "pino": "^9.5.0",
+    "undici": "^7.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
