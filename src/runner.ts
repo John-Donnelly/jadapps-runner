@@ -13,6 +13,7 @@ import { WorkerPool } from "./runtime/worker-pool.js";
 import { Executor } from "./runtime/executor.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
 import { DispatchPoller } from "./dispatch/poller.js";
+import { WakeSocket } from "./dispatch/wake-socket.js";
 
 const STALE_SCRATCH_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -55,13 +56,21 @@ export async function startRunner(): Promise<Runner> {
   const server = await bootHttpServer({ cfg, log, executor, credentials, tokens, telemetry, scratch });
 
   let poller: DispatchPoller | null = null;
+  let wakeSocket: WakeSocket | null = null;
   if (cfg.autoDispatch) {
     poller = new DispatchPoller(cfg.apiBase, tokens, executor, scratch, api, log);
     poller.start();
     log.info({ apiBase: cfg.apiBase }, "auto-dispatch poller running");
+
+    const wakeBase = process.env.JADAPPS_RUNNER_WSS_URL;
+    if (wakeBase) {
+      wakeSocket = new WakeSocket(wakeBase, tokens, () => poller!.kick(), log);
+      wakeSocket.start();
+      log.info({ wssUrl: wakeBase }, "wake socket enabled");
+    }
   }
 
-  const shutdown = makeShutdown(log, server, telemetry, workers, bundles, poller);
+  const shutdown = makeShutdown(log, server, telemetry, workers, bundles, poller, wakeSocket);
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
 
@@ -89,6 +98,7 @@ function makeShutdown(
   workers: WorkerPool,
   bundles: BundleLoader,
   poller: DispatchPoller | null,
+  wakeSocket: WakeSocket | null,
 ): () => Promise<void> {
   let shutting = false;
   return async () => {
@@ -96,6 +106,7 @@ function makeShutdown(
     shutting = true;
     log.info("shutting down runner");
     try {
+      if (wakeSocket) await wakeSocket.stop();
       if (poller) await poller.stop();
       telemetry.stop();
       await telemetry.flush().catch(() => undefined);

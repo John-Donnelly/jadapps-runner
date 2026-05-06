@@ -102,6 +102,74 @@ program
   });
 
 program
+  .command("oauth2 <providerName> <ref>")
+  .description("Run an OAuth2 PKCE flow and save the token under <ref> in the runner credential store.")
+  .requiredOption("--client-id <id>", "OAuth2 client_id")
+  .option("--client-secret <secret>", "OAuth2 client_secret (omit for public/PKCE-only clients)")
+  .requiredOption("--auth-url <url>", "Authorization endpoint")
+  .requiredOption("--token-url <url>", "Token endpoint")
+  .option("--scope <scopes>", "Space-separated scopes", "")
+  .option("--auth-style <style>", "client_secret_post (default) or client_secret_basic", "client_secret_post")
+  .action(
+    async (
+      providerName: string,
+      ref: string,
+      opts: {
+        clientId: string;
+        clientSecret?: string;
+        authUrl: string;
+        tokenUrl: string;
+        scope: string;
+        authStyle: "client_secret_post" | "client_secret_basic";
+      },
+    ) => {
+      const { runOAuth2Flow, storeOAuth2Credential } = await import("./auth/oauth2.js");
+      const { CredentialStore } = await import("./credentials/store.js");
+      const { paths: pathsFn } = await import("./config.js");
+      const cfg = loadConfig();
+      const log = createLogger(cfg.logLevel);
+      const secrets = new SecretStore(cfg.dataDir);
+      const store = new CredentialStore(pathsFn(cfg).sqlite, secrets);
+      await store.init();
+
+      try {
+        const result = await runOAuth2Flow(
+          {
+            name: providerName,
+            authorizationUrl: opts.authUrl,
+            tokenUrl: opts.tokenUrl,
+            clientId: opts.clientId,
+            ...(opts.clientSecret ? { clientSecret: opts.clientSecret } : {}),
+            scopes: opts.scope.split(/\s+/).filter(Boolean),
+            authStyle: opts.authStyle,
+          },
+          log,
+        );
+        await storeOAuth2Credential(
+          store,
+          ref,
+          {
+            name: providerName,
+            authorizationUrl: opts.authUrl,
+            tokenUrl: opts.tokenUrl,
+            clientId: opts.clientId,
+            scopes: opts.scope.split(/\s+/).filter(Boolean),
+          },
+          result,
+        );
+        process.stdout.write(
+          `\nStored OAuth2 token under credential ref "${ref}".\n` +
+            (result.expiresAt ? `Expires at: ${new Date(result.expiresAt).toISOString()}\n` : "") +
+            (result.refreshToken ? "Refresh token saved.\n" : "No refresh token returned.\n"),
+        );
+      } catch (err) {
+        process.stderr.write(`\nOAuth2 flow failed: ${(err as Error).message}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
+
+program
   .command("unpair")
   .description("Remove this device's pairing record and stored credentials.")
   .action(async () => {

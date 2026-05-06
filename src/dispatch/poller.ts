@@ -42,6 +42,7 @@ const POLL_BACKOFF_MS_ERROR = 30_000;
 export class DispatchPoller {
   private stopRequested = false;
   private running: Promise<void> | null = null;
+  private kickResolve: (() => void) | null = null;
 
   constructor(
     private readonly apiBase: string,
@@ -51,6 +52,14 @@ export class DispatchPoller {
     private readonly api: ApiClient,
     private readonly log: Logger,
   ) {}
+
+  /** External signal (e.g. from WakeSocket) that there's likely work now. */
+  kick(): void {
+    if (this.kickResolve) {
+      this.kickResolve();
+      this.kickResolve = null;
+    }
+  }
 
   start(): void {
     if (this.running) return;
@@ -71,16 +80,27 @@ export class DispatchPoller {
       try {
         const claim = await this.claim();
         if (!claim.claimed) {
-          await sleep(POLL_BACKOFF_MS_NO_WORK);
+          await this.sleepInterruptible(POLL_BACKOFF_MS_NO_WORK);
           continue;
         }
         await this.executeClaim(claim);
         await sleep(POLL_BACKOFF_MS_AFTER_WORK);
       } catch (err) {
         this.log.warn({ err }, "auto-dispatch tick failed");
-        await sleep(POLL_BACKOFF_MS_ERROR);
+        await this.sleepInterruptible(POLL_BACKOFF_MS_ERROR);
       }
     }
+  }
+
+  /** Sleep that resolves early if `kick()` is called. */
+  private sleepInterruptible(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      this.kickResolve = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
   }
 
   private async claim(): Promise<ClaimResponse> {
