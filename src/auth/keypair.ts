@@ -1,4 +1,4 @@
-import { generateKeyPairSync, createSign, createVerify } from "node:crypto";
+import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 
 export interface RawKeypair {
   publicKey: string;
@@ -13,11 +13,9 @@ export function generateEd25519(): RawKeypair {
   };
 }
 
+/** Ed25519 sign — algorithm arg is null because EdDSA has its own internal hashing. */
 export function signWithDeviceKey(privateKeyPem: string, payload: string): string {
-  const signer = createSign("SHA256");
-  signer.update(payload);
-  signer.end();
-  return signer.sign(privateKeyPem, "base64");
+  return cryptoSign(null, Buffer.from(payload, "utf8"), privateKeyPem).toString("base64");
 }
 
 export function verifyDeviceSignature(
@@ -25,8 +23,10 @@ export function verifyDeviceSignature(
   payload: string,
   signatureB64: string,
 ): boolean {
-  const verifier = createVerify("SHA256");
-  verifier.update(payload);
-  verifier.end();
-  return verifier.verify(publicKeyPem, signatureB64, "base64");
+  return cryptoVerify(
+    null,
+    Buffer.from(payload, "utf8"),
+    publicKeyPem,
+    Buffer.from(signatureB64, "base64"),
+  );
 }
