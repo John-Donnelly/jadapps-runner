@@ -17,11 +17,19 @@ program
 program
   .command("start")
   .description("Start the local runner daemon (HTTP on loopback).")
-  .action(async () => {
+  .option(
+    "--auto-dispatch",
+    "Poll the JAD Apps queue for cron/webhook-triggered runs and execute them inline (linear chains only).",
+  )
+  .action(async (opts: { autoDispatch?: boolean }) => {
+    if (opts.autoDispatch) process.env.JADAPPS_RUNNER_AUTO_DISPATCH = "true";
     const runner = await startRunner();
     process.stdout.write(
       `\nRunner online at http://127.0.0.1:${runner.port}\n` +
         `Pairing token (paste into JAD Apps → Settings → Devices):\n  ${runner.pairingToken}\n` +
+        (opts.autoDispatch
+          ? `Auto-dispatch enabled — polling ${runner.apiBase} for queued runs.\n`
+          : "") +
         `\nPress Ctrl+C to stop.\n`,
     );
     // Keep process alive on Windows where Fastify doesn't always block.

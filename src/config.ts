@@ -9,6 +9,8 @@ export interface RunnerConfig {
   dataDir: string;
   logLevel: "trace" | "debug" | "info" | "warn" | "error";
   dev: boolean;
+  /** When true, the runner polls /api/runner/dispatch/claim and runs queued workflows. */
+  autoDispatch: boolean;
 }
 
 const DEFAULT_DATA_DIR = join(homedir(), ".jadapps-runner");
@@ -25,6 +27,7 @@ export function loadConfig(): RunnerConfig {
     dataDir,
     logLevel: (process.env.JADAPPS_RUNNER_LOG_LEVEL as RunnerConfig["logLevel"]) ?? "info",
     dev: process.env.JADAPPS_RUNNER_DEV === "true",
+    autoDispatch: process.env.JADAPPS_RUNNER_AUTO_DISPATCH === "true",
   };
 }
 

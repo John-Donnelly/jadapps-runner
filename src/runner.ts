@@ -12,6 +12,7 @@ import { BundleLoader } from "./runtime/bundle-loader.js";
 import { WorkerPool } from "./runtime/worker-pool.js";
 import { Executor } from "./runtime/executor.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
+import { DispatchPoller } from "./dispatch/poller.js";
 
 const STALE_SCRATCH_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -53,7 +54,14 @@ export async function startRunner(): Promise<Runner> {
 
   const server = await bootHttpServer({ cfg, log, executor, credentials, tokens, telemetry, scratch });
 
-  const shutdown = makeShutdown(log, server, telemetry, workers, bundles);
+  let poller: DispatchPoller | null = null;
+  if (cfg.autoDispatch) {
+    poller = new DispatchPoller(cfg.apiBase, tokens, executor, scratch, api, log);
+    poller.start();
+    log.info({ apiBase: cfg.apiBase }, "auto-dispatch poller running");
+  }
+
+  const shutdown = makeShutdown(log, server, telemetry, workers, bundles, poller);
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
 
@@ -80,6 +88,7 @@ function makeShutdown(
   telemetry: TelemetryClient,
   workers: WorkerPool,
   bundles: BundleLoader,
+  poller: DispatchPoller | null,
 ): () => Promise<void> {
   let shutting = false;
   return async () => {
@@ -87,6 +96,7 @@ function makeShutdown(
     shutting = true;
     log.info("shutting down runner");
     try {
+      if (poller) await poller.stop();
       telemetry.stop();
       await telemetry.flush().catch(() => undefined);
       await server.shutdown();
