@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { writeFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import type { Executor } from "../runtime/executor.js";
 import type { CredentialStore } from "../credentials/store.js";
@@ -171,6 +172,34 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
       if (!/^[a-zA-Z0-9_-]{1,128}$/.test(req.params.runId)) return { ok: false };
       deps.scratch.release(req.params.runId);
       return { ok: true };
+    },
+  );
+
+  app.get<{ Params: { runId: string; ref: string } }>(
+    "/v1/runs/:runId/files/:ref",
+    async (req, reply) => {
+      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(req.params.runId)) {
+        reply.code(400).send({ error: "invalid runId" });
+        return;
+      }
+      let path: string;
+      try {
+        path = deps.scratch.resolve(req.params.runId, req.params.ref);
+      } catch {
+        reply.code(400).send({ error: "invalid ref" });
+        return;
+      }
+      try {
+        const st = await stat(path);
+        reply
+          .header("content-type", "application/octet-stream")
+          .header("content-length", String(st.size))
+          .header("content-disposition", `attachment; filename="${req.params.ref}"`);
+        return reply.send(createReadStream(path));
+      } catch {
+        reply.code(404).send({ error: "file not found" });
+        return;
+      }
     },
   );
 }

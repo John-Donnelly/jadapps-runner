@@ -17,6 +17,11 @@ interface SpawnOpts {
   scratchDir: string;
 }
 
+interface SpawnInit {
+  modulePath: string;
+  toolId: string;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // In dev (tsx) we run worker.ts; built we run dist/runtime/worker.js. Tests
 // can override via the `workerEntry` constructor arg (or the env var) to
@@ -46,8 +51,9 @@ export class WorkerPool {
     const key = `${opts.toolId}:${opts.modulePath}`;
     let entry = this.workers.get(key);
     if (!entry) {
+      const init: SpawnInit = { modulePath: opts.modulePath, toolId: opts.toolId };
       const worker = new Worker(this.workerEntry, {
-        workerData: opts,
+        workerData: init,
         env: process.env,
       });
       const pending = new Map<string, PendingJob>();
@@ -83,7 +89,13 @@ export class WorkerPool {
     const jobId = randomUUID();
     return new Promise<StepResult>((resolve, reject) => {
       entry!.pending.set(jobId, { resolve, reject, onProgress: onProgress ?? (() => {}) });
-      entry!.worker.postMessage({ jobId, inputs, fileRefs, credentials });
+      entry!.worker.postMessage({
+        jobId,
+        inputs,
+        fileRefs,
+        credentials,
+        scratchDir: opts.scratchDir,
+      });
     });
   }
 

@@ -4,7 +4,6 @@ import type { Credential, FileRef, StepResult } from "../types.js";
 interface WorkerInit {
   modulePath: string;
   toolId: string;
-  scratchDir: string;
 }
 
 interface WorkerJob {
@@ -12,6 +11,7 @@ interface WorkerJob {
   inputs: Record<string, unknown>;
   fileRefs: FileRef[];
   credentials: Record<string, Credential>;
+  scratchDir: string;
 }
 
 interface ToolModule {
@@ -55,7 +55,7 @@ port.on("message", async (job: WorkerJob) => {
       inputs: job.inputs,
       fileRefs: job.fileRefs,
       credentials: job.credentials,
-      scratchDir: init.scratchDir,
+      scratchDir: job.scratchDir,
       emitProgress: (bytes) => port.postMessage({ type: "progress", jobId: job.jobId, bytes }),
     };
     const result = await mod.default(ctx);
