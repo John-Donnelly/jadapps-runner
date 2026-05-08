@@ -113,6 +113,21 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
     };
   });
 
+  app.get("/v1/tools", async () => {
+    // Phase 2: Returns catalogue of all runnable tools { slug, family, requires, minTier, schema }
+    // For now, stub returns empty catalogue.
+    return { tools: [] };
+  });
+
+  app.post<{ Params: { slug: string } }>(
+    "/v1/tools/:slug/run",
+    async (req, reply) => {
+      // Phase 2: Execute a tool by slug with multipart files + options.
+      // Route delegates to catalogue + executor. For now, stub returns 501.
+      reply.code(501).send({ error: "Tool execution not yet implemented" });
+    },
+  );
+
   app.post("/v1/execute", async (req, reply) => {
     const parsed = ExecuteBody.safeParse(req.body);
     if (!parsed.success) {

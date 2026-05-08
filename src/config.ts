@@ -23,7 +23,7 @@ export function loadConfig(): RunnerConfig {
   return {
     apiBase: (process.env.JADAPPS_API_BASE ?? "https://jadapps.app").replace(/\/$/, ""),
     host: process.env.JADAPPS_RUNNER_HOST ?? "127.0.0.1",
-    port: Number(process.env.JADAPPS_RUNNER_PORT ?? 49217),
+    port: Number(process.env.JADAPPS_RUNNER_PORT ?? 9789),
     dataDir,
     logLevel: (process.env.JADAPPS_RUNNER_LOG_LEVEL as RunnerConfig["logLevel"]) ?? "info",
     dev: process.env.JADAPPS_RUNNER_DEV === "true",
