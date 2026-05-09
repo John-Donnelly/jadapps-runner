@@ -155,6 +155,11 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   // Format-conversion tail.
   "image-to-pdf": { module: "image-to-pdf", npmDeps: ["pdf-lib"] },
   "md-to-docx": { module: "md-to-docx", npmDeps: ["docx"] },
+  // Final batch — combinations of existing deps.
+  "pdf-diff": { module: "pdf-diff", npmDeps: ["pdfjs-dist"] },
+  "pdf-to-excel": { module: "pdf-to-excel", npmDeps: ["pdfjs-dist", "exceljs"] },
+  "pdf-to-word": { module: "pdf-to-word", npmDeps: ["pdfjs-dist", "docx"] },
+  "svg-to-pdf": { module: "svg-to-pdf", npmDeps: ["pdf-lib"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
