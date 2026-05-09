@@ -18,6 +18,7 @@ import type { ApiClient } from "../api/client.js";
 import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
+import { mountMcpHttp } from "../mcp/http-transport.js";
 
 const PAIRING_TOKEN_FILE = "pairing-token";
 
@@ -90,6 +91,20 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     localWorkflowRunner: opts.localWorkflowRunner,
     log: opts.log,
     pairingToken,
+  });
+
+  // MCP over HTTP at /mcp — same Bearer-token auth as the rest of the API,
+  // bound to 127.0.0.1 only (never internet-reachable).
+  await mountMcpHttp(app, {
+    log: opts.log,
+    executor: opts.executor,
+    catalogue: opts.catalogue,
+    tokens: opts.tokens,
+    credentials: opts.credentials,
+    scratch: opts.scratch,
+    workflowStore: opts.workflowStore,
+    workflowSync: opts.workflowSync,
+    localWorkflowRunner: opts.localWorkflowRunner,
   });
 
   await app.listen({ host: opts.cfg.host, port: opts.cfg.port });

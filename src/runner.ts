@@ -29,6 +29,16 @@ export interface Runner {
   pairingToken: string;
   port: number;
   apiBase: string;
+  // Exposed for the `mcp` CLI subcommand — bypasses the HTTP layer and
+  // hands these straight to McpServer over stdio. Keep the surface narrow.
+  log: import("./log.js").Logger;
+  executor: Executor;
+  catalogue: ToolCatalogue;
+  credentials: CredentialStore;
+  scratch: ScratchManager;
+  workflowStore: WorkflowStore;
+  workflowSync: WorkflowSync;
+  localWorkflowRunner: LocalWorkflowRunner;
 }
 
 /** Wire the dependency graph and start the local HTTP server. */
@@ -134,6 +144,14 @@ export async function startRunner(): Promise<Runner> {
     pairingToken: server.pairingToken,
     port: server.port,
     apiBase: cfg.apiBase,
+    log,
+    executor,
+    catalogue,
+    credentials,
+    scratch,
+    workflowStore,
+    workflowSync,
+    localWorkflowRunner,
   };
 }
 

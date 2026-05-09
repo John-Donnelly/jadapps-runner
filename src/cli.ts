@@ -182,6 +182,76 @@ program
     process.stdout.write(`Unpaired. Data dir untouched at ${paths(cfg).pairing}\n`);
   });
 
+program
+  .command("mcp")
+  .description(
+    "Run as an MCP server over stdio (for Claude Desktop / Cursor / IDE clients). " +
+      "Reads JSON-RPC on stdin, writes on stdout; logs go to stderr only.",
+  )
+  .action(async () => {
+    // Suppress all stdout writes from the runner boot — stdio is reserved for
+    // MCP framing. Loggers write to stderr.
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+      // We re-enable stdout once the MCP transport claims it.
+      void chunk;
+      void rest;
+      return true;
+    }) as typeof process.stdout.write;
+
+    const runner = await startRunner();
+
+    // Restore stdout for the MCP transport.
+    process.stdout.write = originalWrite;
+
+    const { StdioServerTransport } = await import(
+      "@modelcontextprotocol/sdk/server/stdio.js"
+    );
+    const { createMcpServer } = await import("./mcp/server.js");
+
+    const mcpServer = createMcpServer({
+      log: runner.log,
+      executor: runner.executor,
+      catalogue: runner.catalogue,
+      tokens: runner.tokens,
+      credentials: runner.credentials,
+      scratch: runner.scratch,
+      workflowStore: runner.workflowStore,
+      workflowSync: runner.workflowSync,
+      localWorkflowRunner: runner.localWorkflowRunner,
+    });
+
+    const transport = new StdioServerTransport();
+    await mcpServer.connect(transport as unknown as Parameters<typeof mcpServer.connect>[0]);
+
+    // Keep the process alive — stdio transport runs until EOF on stdin.
+    process.on("SIGINT", () => {
+      void runner.shutdown().then(() => process.exit(0));
+    });
+    process.on("SIGTERM", () => {
+      void runner.shutdown().then(() => process.exit(0));
+    });
+  });
+
+program
+  .command("mcp-config")
+  .description("Print a Claude Desktop config snippet for adding this runner.")
+  .action(() => {
+    const path = process.execPath;
+    const snippet = {
+      mcpServers: {
+        jadapps: {
+          command: path,
+          args: [process.argv[1] ?? "jadapps-runner", "mcp"],
+        },
+      },
+    };
+    process.stdout.write(JSON.stringify(snippet, null, 2) + "\n");
+    process.stdout.write(
+      "\nPaste this into your Claude Desktop / Cursor MCP server config and restart the client.\n",
+    );
+  });
+
 program.parseAsync(process.argv).catch((err) => {
   process.stderr.write(`error: ${(err as Error).message}\n`);
   process.exit(1);
