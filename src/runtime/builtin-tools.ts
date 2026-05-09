@@ -107,6 +107,17 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "excel-unit-converter": { module: "excel-unit-converter", npmDeps: ["exceljs"] },
   "excel-fuzzy-dedup": { module: "excel-fuzzy-dedup", npmDeps: ["exceljs"] },
   "excel-fuzzy-merger": { module: "excel-fuzzy-merger", npmDeps: ["exceljs"] },
+  // Excel family (batch 3 of 3) — analytical and generator tools.
+  "excel-formula-explainer": { module: "excel-formula-explainer", npmDeps: ["exceljs"] },
+  "excel-pivot-generator": { module: "excel-pivot-generator", npmDeps: ["exceljs"] },
+  "excel-goal-seek": { module: "excel-goal-seek", npmDeps: ["exceljs"] },
+  "excel-dependency-map": { module: "excel-dependency-map", npmDeps: ["exceljs"] },
+  "excel-svg-dataviz": { module: "excel-svg-dataviz", npmDeps: ["exceljs"] },
+  "excel-tailwind-export": { module: "excel-tailwind-export", npmDeps: ["exceljs"] },
+  "excel-i18n-gen": { module: "excel-i18n-gen", npmDeps: ["exceljs"] },
+  "excel-python-gen": { module: "excel-python-gen", npmDeps: ["exceljs"] },
+  "excel-trpc-router": { module: "excel-trpc-router", npmDeps: ["exceljs"] },
+  "excel-weight-analyzer": { module: "excel-weight-analyzer", npmDeps: ["exceljs"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
