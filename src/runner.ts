@@ -9,6 +9,8 @@ import { CredentialStore } from "./credentials/store.js";
 import { WorkflowStore } from "./workflows/store.js";
 import { WorkflowSync } from "./workflows/sync.js";
 import { LocalWorkflowRunner } from "./workflows/runner.js";
+import { WebhookStore } from "./webhooks/store.js";
+import { WebhookDispatcher } from "./webhooks/dispatcher.js";
 import { EventQueue } from "./telemetry/queue.js";
 import { TelemetryClient } from "./telemetry/client.js";
 import { ScratchManager } from "./runtime/scratch.js";
@@ -42,6 +44,8 @@ export interface Runner {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  webhookStore: WebhookStore;
+  webhookDispatcher: WebhookDispatcher;
   api: ApiClient;
   eventQueue: EventQueue;
   concurrency: ConcurrencyLimiter;
@@ -68,6 +72,10 @@ export async function startRunner(): Promise<Runner> {
   workflowStore.init();
   const workflowSync = new WorkflowSync(api, tokens, workflowStore, log);
 
+  const webhookStore = new WebhookStore(credentials.rawDb(), credentials.masterKey());
+  webhookStore.init();
+  const webhookDispatcher = new WebhookDispatcher(webhookStore, log);
+
   const queue = new EventQueue(credentials.rawDb());
   const telemetry = new TelemetryClient(queue, api, log);
 
@@ -92,7 +100,15 @@ export async function startRunner(): Promise<Runner> {
   const catalogue = new ToolCatalogue(api, tokens, log);
   const concurrency = new ConcurrencyLimiter();
   const rateLimiter = new RateLimiter();
-  const localWorkflowRunner = new LocalWorkflowRunner(executor, catalogue, tokens, scratch, log);
+  const localWorkflowRunner = new LocalWorkflowRunner(
+    executor,
+    catalogue,
+    tokens,
+    scratch,
+    log,
+    webhookDispatcher,
+    workflowStore,
+  );
 
   telemetry.start();
 
@@ -109,6 +125,8 @@ export async function startRunner(): Promise<Runner> {
     workflowStore,
     workflowSync,
     localWorkflowRunner,
+    webhookStore,
+    webhookDispatcher,
     eventQueue: queue,
     concurrency,
     license,
@@ -129,7 +147,15 @@ export async function startRunner(): Promise<Runner> {
   let poller: DispatchPoller | null = null;
   let wakeSocket: WakeSocket | null = null;
   if (cfg.autoDispatch) {
-    poller = new DispatchPoller(cfg.apiBase, tokens, executor, scratch, api, log);
+    poller = new DispatchPoller(
+      cfg.apiBase,
+      tokens,
+      executor,
+      scratch,
+      api,
+      log,
+      webhookDispatcher,
+    );
     poller.start();
     log.info({ apiBase: cfg.apiBase }, "auto-dispatch poller running");
 
@@ -141,7 +167,17 @@ export async function startRunner(): Promise<Runner> {
     }
   }
 
-  const shutdown = makeShutdown(log, server, telemetry, workers, bundles, browserWorker, poller, wakeSocket);
+  const shutdown = makeShutdown(
+    log,
+    server,
+    telemetry,
+    workers,
+    bundles,
+    browserWorker,
+    poller,
+    wakeSocket,
+    webhookDispatcher,
+  );
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
 
@@ -167,6 +203,8 @@ export async function startRunner(): Promise<Runner> {
     workflowStore,
     workflowSync,
     localWorkflowRunner,
+    webhookStore,
+    webhookDispatcher,
     api,
     eventQueue: queue,
     concurrency,
@@ -184,6 +222,7 @@ function makeShutdown(
   browserWorker: BrowserWorker,
   poller: DispatchPoller | null,
   wakeSocket: WakeSocket | null,
+  webhookDispatcher: WebhookDispatcher,
 ): () => Promise<void> {
   let shutting = false;
   return async () => {
@@ -195,6 +234,9 @@ function makeShutdown(
       if (poller) await poller.stop();
       telemetry.stop();
       await telemetry.flush().catch(() => undefined);
+      // Drain pending webhook deliveries before tearing down the HTTP
+      // server — otherwise in-flight retries lose their store handle.
+      await webhookDispatcher.flush().catch(() => undefined);
       await server.shutdown();
       await workers.shutdown();
       bundles.shutdown();

@@ -11,8 +11,10 @@ import type {
   StepDescriptor,
   StepResult,
 } from "../types.js";
-import type { LocalWorkflow } from "./store.js";
+import type { LocalWorkflow, WorkflowStore } from "./store.js";
 import { checkFamilyLimits } from "../runtime/tier-limits.js";
+import type { WebhookDispatcher } from "../webhooks/dispatcher.js";
+import type { WebhookPayload } from "../webhooks/types.js";
 
 /**
  * Local linear workflow runner. Walks the graph topologically and pipes
@@ -87,6 +89,14 @@ export class LocalWorkflowRunner {
     private readonly tokens: TokenManager,
     private readonly scratch: ScratchManager,
     private readonly log: Logger,
+    private readonly webhooks: WebhookDispatcher,
+    /**
+     * Workflow store lookup is best-effort (used to surface workflow name +
+     * version in webhook payloads). Pass-through is fine because run()
+     * receives the LocalWorkflow directly — store access is only for
+     * completeness when called from external code paths.
+     */
+    private readonly workflowStore: WorkflowStore,
   ) {}
 
   async run(
@@ -118,17 +128,24 @@ export class LocalWorkflowRunner {
     const steps: LocalRunResult["steps"] = [];
     let totalBytes = 0;
     let currentFiles: FileRef[] = initialFiles;
+
+    const completeRun = (ok: boolean): LocalRunResult => {
+      const result: LocalRunResult = {
+        runId,
+        ok,
+        steps,
+        durationMs: Date.now() - start,
+        totalBytes,
+      };
+      this.fireWebhook(workflow, result);
+      return result;
+    };
+
     let access;
     try {
       access = await this.tokens.getAccessToken();
     } catch (err) {
-      return {
-        runId,
-        ok: false,
-        steps: [],
-        durationMs: Date.now() - start,
-        totalBytes: 0,
-      };
+      return completeRun(false);
     }
 
     // Acquire a single scratch dir for the whole run so step outputs can
@@ -192,13 +209,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: `Local runner doesn't execute ${node.toolSlug} — port routing requires the website orchestrator. Use workflow_run_enqueue instead.`,
           });
-          return {
-            runId,
-            ok: false,
-            steps,
-            durationMs: Date.now() - start,
-            totalBytes,
-          };
+          return completeRun(false);
         }
 
         const entry = await this.catalogue.lookup(node.toolSlug);
@@ -211,13 +222,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: `tool "${node.toolSlug}" has no runner bundle (browser-only fallback)`,
           });
-          return {
-            runId,
-            ok: false,
-            steps,
-            durationMs: Date.now() - start,
-            totalBytes,
-          };
+          return completeRun(false);
         }
 
         // Phase 9 pre-flight, Phase 11 deferred follow-up: closes the
@@ -235,13 +240,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: `tier_limit_exceeded: ${violation.type} cap ${violation.value} (observed ${violation.observed})`,
           });
-          return {
-            runId,
-            ok: false,
-            steps,
-            durationMs: Date.now() - start,
-            totalBytes,
-          };
+          return completeRun(false);
         }
 
         const runToken: RunToken = {
@@ -290,13 +289,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: (err as Error).message,
           });
-          return {
-            runId,
-            ok: false,
-            steps,
-            durationMs: Date.now() - start,
-            totalBytes,
-          };
+          return completeRun(false);
         }
 
         pushStep(stepIndex, {
@@ -309,27 +302,47 @@ export class LocalWorkflowRunner {
         });
         totalBytes += result.bytesProcessed;
         if (!result.ok) {
-          return {
-            runId,
-            ok: false,
-            steps,
-            durationMs: Date.now() - start,
-            totalBytes,
-          };
+          return completeRun(false);
         }
         currentFiles = result.fileRefs;
       }
 
-      return {
-        runId,
-        ok: true,
-        steps,
-        durationMs: Date.now() - start,
-        totalBytes,
-      };
+      return completeRun(true);
     } finally {
       this.scratch.release(runId);
     }
+  }
+
+  private fireWebhook(workflow: LocalWorkflow, result: LocalRunResult): void {
+    const failedStep = result.steps.find((s) => s.status === "error");
+    const payload: WebhookPayload = {
+      event: result.ok ? "workflow.completed" : "workflow.failed",
+      delivered_at: new Date().toISOString(),
+      workflow: {
+        id: workflow.id,
+        name: workflow.name,
+        version: null,
+      },
+      run: {
+        id: result.runId,
+        status: result.ok ? "succeeded" : "failed",
+        started_at: new Date(Date.now() - result.durationMs).toISOString(),
+        finished_at: new Date().toISOString(),
+        duration_ms: result.durationMs,
+        bytes_processed: result.totalBytes,
+        step_count: result.steps.length,
+        error: failedStep?.error ?? null,
+      },
+    };
+    try {
+      this.webhooks.fireForEvent(payload.event, payload);
+    } catch (err) {
+      this.log.warn({ err, runId: result.runId }, "webhook fireForEvent threw");
+    }
+    // Reference the store so unused-field warnings are quiet — also gives
+    // future callers a way to enrich payloads without changing the
+    // constructor signature.
+    void this.workflowStore;
   }
 }
 

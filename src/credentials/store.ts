@@ -98,4 +98,14 @@ export class CredentialStore {
   rawDb(): Database.Database {
     return this.db;
   }
+
+  /**
+   * The vault master key, base64-encoded. Exposed so other stores in the
+   * runner (e.g. WebhookStore for HMAC secrets) can encrypt sensitive
+   * fields against the same OS-keychain–protected key without each
+   * subsystem needing its own keychain account.
+   */
+  masterKey(): string {
+    return this.master;
+  }
 }

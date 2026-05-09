@@ -13,6 +13,8 @@ import type {
   StepDescriptor,
   StepResult,
 } from "../types.js";
+import type { WebhookDispatcher } from "../webhooks/dispatcher.js";
+import type { WebhookPayload } from "../webhooks/types.js";
 
 interface ClaimResponse {
   claimed: boolean;
@@ -61,6 +63,7 @@ export class DispatchPoller {
     private readonly scratch: ScratchManager,
     private readonly api: ApiClient,
     private readonly log: Logger,
+    private readonly webhooks: WebhookDispatcher,
   ) {}
 
   /** External signal (e.g. from WakeSocket) that there's likely work now. */
@@ -262,7 +265,54 @@ export class DispatchPoller {
       this.scratch.release(runId);
     }
 
+    this.fireWebhook({
+      ok: allOk,
+      runId,
+      workflowId: claim.workflowId,
+      startedAt,
+      stepResults,
+      totalBytes,
+    });
+
     log.info({ ok: allOk, steps: stepResults.length }, "run complete");
+  }
+
+  private fireWebhook(args: {
+    ok: boolean;
+    runId: string;
+    workflowId: string | undefined;
+    startedAt: number;
+    stepResults: StepResult[];
+    totalBytes: number;
+  }): void {
+    const finishedAt = Date.now();
+    const failed = args.stepResults.find((s) => !s.ok);
+    const payload: WebhookPayload = {
+      event: args.ok ? "workflow.completed" : "workflow.failed",
+      delivered_at: new Date(finishedAt).toISOString(),
+      workflow: {
+        id: args.workflowId ?? "",
+        // Server-claimed runs don't include the workflow name in the claim
+        // response — surface the id so recipients have a stable handle.
+        name: args.workflowId ?? "",
+        version: null,
+      },
+      run: {
+        id: args.runId,
+        status: args.ok ? "succeeded" : "failed",
+        started_at: new Date(args.startedAt).toISOString(),
+        finished_at: new Date(finishedAt).toISOString(),
+        duration_ms: finishedAt - args.startedAt,
+        bytes_processed: args.totalBytes,
+        step_count: args.stepResults.length,
+        error: failed?.error?.message ?? null,
+      },
+    };
+    try {
+      this.webhooks.fireForEvent(payload.event, payload);
+    } catch (err) {
+      this.log.warn({ err, runId: args.runId }, "webhook fireForEvent threw");
+    }
   }
 }
 

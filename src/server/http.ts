@@ -18,6 +18,8 @@ import type { ApiClient } from "../api/client.js";
 import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
+import type { WebhookStore } from "../webhooks/store.js";
+import type { WebhookDispatcher } from "../webhooks/dispatcher.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
 import type { RateLimiter } from "../runtime/rate-limit.js";
 import type { LicenseManager } from "../auth/license.js";
@@ -45,6 +47,8 @@ interface BootOptions {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  webhookStore: WebhookStore;
+  webhookDispatcher: WebhookDispatcher;
   eventQueue: import("../telemetry/queue.js").EventQueue;
   concurrency: ConcurrencyLimiter;
   license: LicenseManager;
@@ -96,6 +100,8 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     workflowStore: opts.workflowStore,
     workflowSync: opts.workflowSync,
     localWorkflowRunner: opts.localWorkflowRunner,
+    webhookStore: opts.webhookStore,
+    webhookDispatcher: opts.webhookDispatcher,
     concurrency: opts.concurrency,
     rateLimiter: opts.rateLimiter,
     log: opts.log,

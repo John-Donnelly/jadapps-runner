@@ -15,6 +15,8 @@ import type { ApiClient } from "../api/client.js";
 import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
+import type { WebhookStore } from "../webhooks/store.js";
+import type { WebhookDispatcher } from "../webhooks/dispatcher.js";
 import type { Logger } from "../log.js";
 import type { FileRef, RunToken, StepDescriptor } from "../types.js";
 import {
@@ -93,10 +95,55 @@ interface Deps {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  webhookStore: WebhookStore;
+  webhookDispatcher: WebhookDispatcher;
   concurrency: ConcurrencyLimiter;
   rateLimiter: RateLimiter;
   log: Logger;
   pairingToken: string;
+}
+
+const WEBHOOK_EVENTS = ["workflow.completed", "workflow.failed"] as const;
+const WebhookEventEnum = z.enum(WEBHOOK_EVENTS);
+
+const WebhookCreateBody = z.object({
+  name: z.string().min(1).max(120),
+  url: z.string().url().max(2048),
+  events: z.array(WebhookEventEnum).min(1),
+  active: z.boolean().optional(),
+});
+
+const WebhookUpdateBody = z.object({
+  name: z.string().min(1).max(120).optional(),
+  url: z.string().url().max(2048).optional(),
+  events: z.array(WebhookEventEnum).min(1).optional(),
+  active: z.boolean().optional(),
+});
+
+/**
+ * Reject URLs that point at private/loopback ranges over plain HTTP. Public
+ * targets must be HTTPS — we don't want users accidentally sending payloads
+ * over the open internet without TLS. Loopback http://127.0.0.1 is allowed
+ * for local testing.
+ */
+function validateWebhookUrl(rawUrl: string): { ok: true } | { ok: false; reason: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: "invalid URL" };
+  }
+  if (parsed.protocol === "https:") return { ok: true };
+  if (parsed.protocol !== "http:") {
+    return { ok: false, reason: "url must use http or https" };
+  }
+  const host = parsed.hostname;
+  const isLoopback =
+    host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+  if (!isLoopback) {
+    return { ok: false, reason: "plain http is only allowed for loopback hosts" };
+  }
+  return { ok: true };
 }
 
 const WorkflowBody = z.object({
@@ -425,6 +472,82 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
   app.delete<{ Params: { ref: string } }>("/v1/credentials/:ref", async (req) => {
     const ok = deps.credentials.delete(req.params.ref);
     return { ok };
+  });
+
+  // ─── Webhooks (runner-managed) ────────────────────────────────────────────
+  // URLs, secrets, payloads, and delivery history live entirely on the
+  // runner. The dashboard hits these endpoints over loopback HTTP using
+  // the same pairing-token bearer auth as everything else here.
+
+  app.get("/v1/webhooks", async () => {
+    return { webhooks: deps.webhookStore.list() };
+  });
+
+  app.post("/v1/webhooks", async (req, reply) => {
+    const parsed = WebhookCreateBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "invalid body", issues: parsed.error.issues });
+      return;
+    }
+    const urlCheck = validateWebhookUrl(parsed.data.url);
+    if (!urlCheck.ok) {
+      reply.code(400).send({ error: urlCheck.reason });
+      return;
+    }
+    return deps.webhookStore.create(parsed.data);
+  });
+
+  app.patch<{ Params: { id: string } }>("/v1/webhooks/:id", async (req, reply) => {
+    const parsed = WebhookUpdateBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "invalid body", issues: parsed.error.issues });
+      return;
+    }
+    if (parsed.data.url !== undefined) {
+      const urlCheck = validateWebhookUrl(parsed.data.url);
+      if (!urlCheck.ok) {
+        reply.code(400).send({ error: urlCheck.reason });
+        return;
+      }
+    }
+    const updated = deps.webhookStore.update(req.params.id, parsed.data);
+    if (!updated) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    return updated;
+  });
+
+  app.delete<{ Params: { id: string } }>("/v1/webhooks/:id", async (req, reply) => {
+    const ok = deps.webhookStore.delete(req.params.id);
+    if (!ok) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    reply.code(204).send();
+  });
+
+  app.post<{ Params: { id: string } }>("/v1/webhooks/:id/test", async (req, reply) => {
+    const wh = deps.webhookStore.get(req.params.id);
+    if (!wh) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    const outcome = await deps.webhookDispatcher.testFire(req.params.id);
+    return {
+      ok: outcome.ok,
+      status: outcome.status,
+      error: outcome.error,
+    };
+  });
+
+  app.get<{ Params: { id: string } }>("/v1/webhooks/:id/deliveries", async (req, reply) => {
+    const wh = deps.webhookStore.get(req.params.id);
+    if (!wh) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    return { deliveries: deps.webhookStore.listDeliveries(req.params.id) };
   });
 
   // ─── Local workflow storage (Phase 4) ─────────────────────────────────────
