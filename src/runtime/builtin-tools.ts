@@ -152,6 +152,9 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pgp-message-signer": { module: "pgp-message-signer", npmDeps: ["openpgp"] },
   "exif-map-previewer": { module: "exif-map-previewer", npmDeps: ["exifr"] },
   "hidden-thumbnail-extractor": { module: "hidden-thumbnail-extractor", npmDeps: ["exifr"] },
+  // Format-conversion tail.
+  "image-to-pdf": { module: "image-to-pdf", npmDeps: ["pdf-lib"] },
+  "md-to-docx": { module: "md-to-docx", npmDeps: ["docx"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

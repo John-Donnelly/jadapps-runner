@@ -117,6 +117,8 @@ export default defineConfig({
     "builtin-connectors/pgp-message-signer": "src/builtin-connectors/pgp-message-signer.ts",
     "builtin-connectors/exif-map-previewer": "src/builtin-connectors/exif-map-previewer.ts",
     "builtin-connectors/hidden-thumbnail-extractor": "src/builtin-connectors/hidden-thumbnail-extractor.ts",
+    "builtin-connectors/image-to-pdf": "src/builtin-connectors/image-to-pdf.ts",
+    "builtin-connectors/md-to-docx": "src/builtin-connectors/md-to-docx.ts",
   },
   format: ["esm"],
   target: "node20",
