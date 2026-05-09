@@ -1,16 +1,19 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { createHash } from "node:crypto";
-import { writeFile, stat, statfs } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { writeFile, stat, statfs, mkdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Executor } from "../runtime/executor.js";
 import type { CredentialStore } from "../credentials/store.js";
 import type { TokenManager } from "../auth/tokens.js";
 import type { TelemetryClient } from "../telemetry/client.js";
 import type { ScratchManager } from "../runtime/scratch.js";
+import type { ToolCatalogue } from "../runtime/tool-catalogue.js";
+import type { ApiClient } from "../api/client.js";
 import type { Logger } from "../log.js";
-import type { RunToken, StepDescriptor } from "../types.js";
+import type { FileRef, RunToken, StepDescriptor } from "../types.js";
 
 const StepSchema = z.object({
   runId: z.string().min(1),
@@ -29,15 +32,21 @@ const StepSchema = z.object({
   credentialRefs: z.array(z.string()),
 });
 
+const RuntimeEnum = z.enum([
+  "browser",
+  "runner-local",
+  "runner-native",
+  "runner-builtin",
+  "runner-via-server",
+]);
+
 const ExecuteBody = z.object({
   runToken: z.object({
     runId: z.string(),
     jwt: z.string(),
     byteBudget: z.number(),
     expiresAt: z.number(),
-    allowedRuntimes: z.array(
-      z.enum(["browser", "runner-local", "runner-native", "runner-via-server"]),
-    ),
+    allowedRuntimes: z.array(RuntimeEnum),
     tools: z.array(
       z.object({
         stepIndex: z.number(),
@@ -45,7 +54,7 @@ const ExecuteBody = z.object({
         bundleUrl: z.string(),
         bundleSha256: z.string(),
         decryptionKey: z.string().nullable(),
-        runtime: z.enum(["browser", "runner-local", "runner-native", "runner-via-server"]),
+        runtime: RuntimeEnum,
         ttlSec: z.number(),
       }),
     ),
@@ -65,8 +74,21 @@ interface Deps {
   tokens: TokenManager;
   telemetry: TelemetryClient;
   scratch: ScratchManager;
+  catalogue: ToolCatalogue;
+  api: ApiClient;
   log: Logger;
   pairingToken: string;
+}
+
+const OUTPUTS_DIRNAME = "jadapps-outputs";
+
+/**
+ * Resolve the user-visible outputs directory under their home dir. Built-in
+ * Downloads/JAD pattern keeps everything under one OS-aware folder users can
+ * find easily ("~/jadapps-outputs/<runId>/<filename>").
+ */
+function outputsDirFor(runId: string): string {
+  return join(homedir(), OUTPUTS_DIRNAME, runId);
 }
 
 export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<void> {
@@ -113,18 +135,192 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
     };
   });
 
-  app.get("/v1/tools", async () => {
-    // Phase 2: Returns catalogue of all runnable tools { slug, family, requires, minTier, schema }
-    // For now, stub returns empty catalogue.
-    return { tools: [] };
+  app.get("/v1/tools", async (_req, reply) => {
+    try {
+      const tools = await deps.catalogue.list();
+      return { tools, count: tools.length };
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message });
+      return;
+    }
   });
 
   app.post<{ Params: { slug: string } }>(
     "/v1/tools/:slug/run",
     async (req, reply) => {
-      // Phase 2: Execute a tool by slug with multipart files + options.
-      // Route delegates to catalogue + executor. For now, stub returns 501.
-      reply.code(501).send({ error: "Tool execution not yet implemented" });
+      const { slug } = req.params;
+      if (!/^[a-zA-Z0-9_-]+$/.test(slug)) {
+        reply.code(400).send({ error: "invalid slug" });
+        return;
+      }
+
+      const entry = await deps.catalogue.lookup(slug);
+      if (!entry) {
+        reply.code(404).send({ error: `tool not in catalogue: ${slug}` });
+        return;
+      }
+
+      // Tier gating happens server-side in the catalogue, but enforce here too:
+      // the access token's tier must meet the tool's tierRequired.
+      let access: Awaited<ReturnType<typeof deps.tokens.getAccessToken>>;
+      try {
+        access = await deps.tokens.getAccessToken();
+      } catch (err) {
+        reply.code(401).send({ error: `runner unpaired: ${(err as Error).message}` });
+        return;
+      }
+
+      // Parse multipart parts: `files` (multiple), `options` (JSON), `text`.
+      const runId = randomUUID();
+      const scratchDir = deps.scratch.acquire(runId);
+      const fileRefs: FileRef[] = [];
+      let options: Record<string, unknown> = {};
+      let text: string | undefined;
+
+      try {
+        const parts = req.parts();
+        for await (const part of parts) {
+          if (part.type === "file") {
+            const buf = await part.toBuffer();
+            const sha = createHash("sha256").update(buf).digest("hex");
+            const safeName = (part.filename ?? "upload").replace(/[^a-zA-Z0-9_.-]/g, "_");
+            const ref = `${sha.slice(0, 16)}-${safeName}`;
+            await writeFile(join(scratchDir, ref), buf);
+            fileRefs.push({
+              ref,
+              bytes: buf.length,
+              sha256: sha,
+              mime: part.mimetype ?? "application/octet-stream",
+              filename: part.filename ?? safeName,
+            });
+          } else if (part.type === "field") {
+            if (part.fieldname === "options") {
+              try {
+                options = JSON.parse(String(part.value)) as Record<string, unknown>;
+              } catch {
+                deps.scratch.release(runId);
+                reply.code(400).send({ error: "options must be valid JSON" });
+                return;
+              }
+            } else if (part.fieldname === "text") {
+              text = String(part.value);
+            }
+          }
+        }
+      } catch (err) {
+        deps.scratch.release(runId);
+        reply.code(400).send({ error: `multipart parse failed: ${(err as Error).message}` });
+        return;
+      }
+
+      // If a text field was provided, expose it under inputs for the tool's
+      // ctx.inputs.text — many bundles fall back to this when no file is attached.
+      if (text != null) {
+        options.text = options.text ?? text;
+      }
+
+      // Build a synthetic single-step runToken for ad-hoc dispatch. No
+      // workflow run is created server-side — this is a one-shot tool call.
+      const runToken: RunToken = {
+        runId,
+        jwt: access.jwt,
+        byteBudget: access.limits.maxBytesPerRun,
+        expiresAt: access.expiresAt,
+        allowedRuntimes: [
+          "runner-local",
+          "runner-native",
+          "runner-builtin",
+          "runner-via-server",
+        ],
+        tools: [
+          {
+            stepIndex: 0,
+            toolId: entry.toolId,
+            bundleUrl: entry.bundleUrl,
+            bundleSha256: entry.bundleSha256,
+            decryptionKey: null,
+            runtime: entry.runtime,
+            ttlSec: 600,
+          },
+        ],
+      };
+
+      const step: StepDescriptor = {
+        runId,
+        stepIndex: 0,
+        toolId: entry.toolId,
+        inputs: options,
+        fileRefs,
+        credentialRefs: extractCredentialRefs(options),
+      };
+
+      const result = await deps.executor.execute({ runToken, step });
+
+      // For successful runs that produced output files (returned via fileRefs
+      // on the StepResult), copy the first one to the user's outputs dir and
+      // surface its absolute path as outputPath. This matches the website's
+      // RunnerJobResult contract.
+      const outDir = outputsDirFor(runId);
+      let outputPath = "";
+      let filename = "";
+      let mimeType = "application/json";
+      let sizeBytes = 0;
+      let inlineText: string | undefined;
+
+      if (result.ok && result.fileRefs.length > 0) {
+        const primary = result.fileRefs[0]!;
+        await mkdir(outDir, { recursive: true });
+        const target = join(outDir, primary.filename);
+        try {
+          // primary.ref is the scratch path within the runId's scratch dir
+          const src = deps.scratch.resolve(runId, primary.ref);
+          const buf = await readFileSafely(src);
+          if (buf) {
+            await writeFile(target, buf);
+            outputPath = target;
+            filename = primary.filename;
+            mimeType = primary.mime;
+            sizeBytes = buf.length;
+          }
+        } catch (err) {
+          deps.log.warn({ err, primary }, "could not save output to user dir");
+        }
+      }
+
+      // Text outputs (no files): surface inlineText so the client can show it
+      // without having to read from disk.
+      if (result.ok && result.fileRefs.length === 0) {
+        const out = result.outputs?.text;
+        if (typeof out === "string") {
+          inlineText = out;
+          sizeBytes = Buffer.byteLength(out, "utf8");
+        }
+      }
+
+      // Release the scratch dir — outputs were copied above, no need to keep
+      // intermediate files around past the run.
+      deps.scratch.release(runId);
+
+      if (!result.ok) {
+        reply.code(422).send({
+          error: result.error?.code ?? "tool_failed",
+          message: result.error?.message ?? "tool execution failed",
+          outputs: result.outputs,
+        });
+        return;
+      }
+
+      return {
+        outputPath,
+        filename,
+        mimeType,
+        sizeBytes,
+        durationMs: result.durationMs,
+        metrics: extractMetrics(result.outputs),
+        inlineText,
+        mode: entry.runtime === "runner-native" ? "headless-browser" : "engine",
+        outputs: result.outputs,
+      };
     },
   );
 
@@ -230,4 +426,48 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
       }
     },
   );
+}
+
+/**
+ * Pull credential refs out of an inputs object. Connector tools take the ref
+ * as a top-level config field; HTTP-Request style tools also support
+ * inputs.credentialRefs[] for multiple credentials. We accept either.
+ */
+function extractCredentialRefs(options: Record<string, unknown>): string[] {
+  const refs = new Set<string>();
+  if (typeof options.credentialRef === "string" && options.credentialRef.trim()) {
+    refs.add(options.credentialRef.trim());
+  }
+  if (Array.isArray(options.credentialRefs)) {
+    for (const r of options.credentialRefs) {
+      if (typeof r === "string" && r.trim()) refs.add(r.trim());
+    }
+  }
+  return [...refs];
+}
+
+/**
+ * Pull primitive metric values out of a tool's outputs. Useful for surfacing
+ * simple numeric/string results to the website without dumping the full
+ * outputs object on the wire response.
+ */
+function extractMetrics(outputs: Record<string, unknown>): Record<string, string | number> | undefined {
+  const out: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(outputs)) {
+    if (typeof v === "number" || typeof v === "string") {
+      // Cap string length so we don't explode the wire response
+      if (typeof v === "string" && v.length > 200) continue;
+      out[k] = v;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+async function readFileSafely(path: string): Promise<Buffer | null> {
+  try {
+    const fs = await import("node:fs/promises");
+    return await fs.readFile(path);
+  } catch {
+    return null;
+  }
 }

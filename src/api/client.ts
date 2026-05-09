@@ -1,7 +1,26 @@
 import { request } from "undici";
 import { signWithDeviceKey } from "../auth/keypair.js";
-import type { AccessToken, RunToken, StepDescriptor, StepResult, TelemetryEvent } from "../types.js";
+import type {
+  AccessToken,
+  RunToken,
+  Runtime,
+  StepDescriptor,
+  StepResult,
+  Tier,
+  TelemetryEvent,
+} from "../types.js";
 import type { Logger } from "../log.js";
+
+export interface CatalogueEntry {
+  slug: string;
+  toolId: string;
+  version: string;
+  runtime: Runtime;
+  tierRequired: Tier;
+  bundleUrl: string;
+  bundleSha256: string;
+  encrypted: boolean;
+}
 
 interface BeginPairInput {
   pendingId: string;
@@ -108,6 +127,26 @@ export class ApiClient {
       throw new Error(`bundle fetch failed: ${res.statusCode}`);
     }
     return Buffer.from(await res.body.arrayBuffer());
+  }
+
+  /**
+   * Fetch the runner-tool catalogue. Used to populate /v1/tools and resolve
+   * bundle metadata for slug-based dispatch (POST /v1/tools/:slug/run).
+   */
+  async fetchToolCatalogue(accessJwt: string): Promise<{
+    tools: CatalogueEntry[];
+    generatedAt: number;
+  }> {
+    const url = `${this.apiBase}/api/runner/tools/catalogue`;
+    const res = await request(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${accessJwt}` },
+    });
+    if (res.statusCode >= 300) {
+      const text = await res.body.text();
+      throw new ApiError(res.statusCode, text);
+    }
+    return (await res.body.json()) as { tools: CatalogueEntry[]; generatedAt: number };
   }
 
   async postEvents(

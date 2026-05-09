@@ -11,6 +11,7 @@ import { ScratchManager } from "./runtime/scratch.js";
 import { BundleLoader } from "./runtime/bundle-loader.js";
 import { WorkerPool } from "./runtime/worker-pool.js";
 import { Executor } from "./runtime/executor.js";
+import { ToolCatalogue } from "./runtime/tool-catalogue.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
 import { DispatchPoller } from "./dispatch/poller.js";
 import { WakeSocket } from "./dispatch/wake-socket.js";
@@ -50,10 +51,21 @@ export async function startRunner(): Promise<Runner> {
   const bundles = new BundleLoader(api, log);
   const workers = new WorkerPool(log);
   const executor = new Executor(log, api, tokens, credentials, telemetry, bundles, workers, scratch);
+  const catalogue = new ToolCatalogue(api, tokens, log);
 
   telemetry.start();
 
-  const server = await bootHttpServer({ cfg, log, executor, credentials, tokens, telemetry, scratch });
+  const server = await bootHttpServer({
+    cfg,
+    log,
+    executor,
+    credentials,
+    tokens,
+    telemetry,
+    scratch,
+    catalogue,
+    api,
+  });
 
   let poller: DispatchPoller | null = null;
   let wakeSocket: WakeSocket | null = null;

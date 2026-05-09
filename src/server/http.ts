@@ -13,6 +13,8 @@ import type { CredentialStore } from "../credentials/store.js";
 import type { TokenManager } from "../auth/tokens.js";
 import type { TelemetryClient } from "../telemetry/client.js";
 import type { ScratchManager } from "../runtime/scratch.js";
+import type { ToolCatalogue } from "../runtime/tool-catalogue.js";
+import type { ApiClient } from "../api/client.js";
 
 const PAIRING_TOKEN_FILE = "pairing-token";
 
@@ -31,6 +33,8 @@ interface BootOptions {
   tokens: TokenManager;
   telemetry: TelemetryClient;
   scratch: ScratchManager;
+  catalogue: ToolCatalogue;
+  api: ApiClient;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -51,7 +55,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
   await app.register(multipart, {
     limits: {
       fileSize: 50 * 1024 * 1024 * 1024, // 50GB; runner has access to disk
-      files: 1,
+      files: 16,
     },
   });
 
@@ -73,6 +77,8 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     tokens: opts.tokens,
     telemetry: opts.telemetry,
     scratch: opts.scratch,
+    catalogue: opts.catalogue,
+    api: opts.api,
     log: opts.log,
     pairingToken,
   });
