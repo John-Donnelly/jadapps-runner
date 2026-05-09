@@ -12,6 +12,9 @@ import type { TelemetryClient } from "../telemetry/client.js";
 import type { ScratchManager } from "../runtime/scratch.js";
 import type { ToolCatalogue } from "../runtime/tool-catalogue.js";
 import type { ApiClient } from "../api/client.js";
+import type { WorkflowStore } from "../workflows/store.js";
+import type { WorkflowSync } from "../workflows/sync.js";
+import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { Logger } from "../log.js";
 import type { FileRef, RunToken, StepDescriptor } from "../types.js";
 
@@ -77,9 +80,29 @@ interface Deps {
   scratch: ScratchManager;
   catalogue: ToolCatalogue;
   api: ApiClient;
+  workflowStore: WorkflowStore;
+  workflowSync: WorkflowSync;
+  localWorkflowRunner: LocalWorkflowRunner;
   log: Logger;
   pairingToken: string;
 }
+
+const WorkflowBody = z.object({
+  id: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .optional(),
+  name: z.string().min(1).max(120),
+  description: z.string().max(2000).optional().default(""),
+  graph: z.object({
+    nodes: z.array(z.unknown()),
+    edges: z.array(z.unknown()),
+  }),
+  scheduleCron: z.string().nullable().optional(),
+  isPrivate: z.boolean().optional().default(true),
+});
 
 const OUTPUTS_DIRNAME = "jadapps-outputs";
 
@@ -363,6 +386,135 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
     return { ok };
   });
 
+  // ─── Local workflow storage (Phase 4) ─────────────────────────────────────
+
+  app.get("/v1/workflows", async () => {
+    const list = deps.workflowStore.list();
+    return {
+      workflows: list.map((w) => ({
+        id: w.id,
+        name: w.name,
+        description: w.description,
+        graph: w.graph,
+        origin: w.origin,
+        isPrivate: w.isPrivate,
+        scheduleCron: w.scheduleCron,
+        serverSyncedAt: w.serverSyncedAt,
+        localUpdatedAt: w.localUpdatedAt,
+      })),
+    };
+  });
+
+  app.get<{ Params: { id: string } }>("/v1/workflows/:id", async (req, reply) => {
+    const wf = deps.workflowStore.get(req.params.id);
+    if (!wf) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    return {
+      id: wf.id,
+      name: wf.name,
+      description: wf.description,
+      graph: wf.graph,
+      origin: wf.origin,
+      isPrivate: wf.isPrivate,
+      scheduleCron: wf.scheduleCron,
+      serverSyncedAt: wf.serverSyncedAt,
+      localUpdatedAt: wf.localUpdatedAt,
+    };
+  });
+
+  app.post("/v1/workflows", async (req, reply) => {
+    const parsed = WorkflowBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "invalid body", issues: parsed.error.issues });
+      return;
+    }
+    const id = parsed.data.id ?? randomUUID();
+    const wf = deps.workflowStore.upsert({
+      id,
+      name: parsed.data.name,
+      description: parsed.data.description ?? null,
+      graph: parsed.data.graph as Record<string, unknown>,
+      serverSyncedAt: null, // unsynced — sync layer will pick it up
+      origin: "local",
+      isPrivate: parsed.data.isPrivate ?? true,
+      scheduleCron: parsed.data.scheduleCron ?? null,
+    });
+    // Fire-and-forget background sync so locally-created workflows appear on
+    // the website's My Workflows page within ~1 sync cycle.
+    void deps.workflowSync.sync().catch((err) => {
+      deps.log.warn({ err }, "post-create workflow sync failed");
+    });
+    return { workflow: serializeWorkflow(wf) };
+  });
+
+  app.put<{ Params: { id: string } }>("/v1/workflows/:id", async (req, reply) => {
+    const parsed = WorkflowBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "invalid body", issues: parsed.error.issues });
+      return;
+    }
+    const existing = deps.workflowStore.get(req.params.id);
+    if (!existing) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    const wf = deps.workflowStore.upsert({
+      id: req.params.id,
+      name: parsed.data.name,
+      description: parsed.data.description ?? null,
+      graph: parsed.data.graph as Record<string, unknown>,
+      // Keep existing server_synced_at — sync layer compares local_updated_at
+      // against it to decide what to push next.
+      serverSyncedAt: existing.serverSyncedAt,
+      origin: existing.origin,
+      isPrivate: parsed.data.isPrivate ?? existing.isPrivate,
+      scheduleCron: parsed.data.scheduleCron ?? existing.scheduleCron,
+    });
+    void deps.workflowSync.sync().catch((err) => {
+      deps.log.warn({ err }, "post-update workflow sync failed");
+    });
+    return { workflow: serializeWorkflow(wf) };
+  });
+
+  app.delete<{ Params: { id: string } }>("/v1/workflows/:id", async (req) => {
+    const ok = deps.workflowStore.delete(req.params.id);
+    // Note: deletion isn't synced to the server in this iteration. A
+    // dedicated tombstone column or a delete-tracking sync table is the
+    // proper fix; for now the user can delete server-side via the website.
+    return { ok };
+  });
+
+  app.post("/v1/workflows/sync", async (_req, reply) => {
+    try {
+      const result = await deps.workflowSync.sync();
+      return result;
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message });
+      return;
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/v1/workflows/:id/run", async (req, reply) => {
+    const wf = deps.workflowStore.get(req.params.id);
+    if (!wf) {
+      reply.code(404).send({ error: "workflow not found" });
+      return;
+    }
+    try {
+      const result = await deps.localWorkflowRunner.run(wf);
+      if (!result.ok) {
+        reply.code(422).send(result);
+        return;
+      }
+      return result;
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message });
+      return;
+    }
+  });
+
   app.post<{ Params: { runId: string } }>(
     "/v1/runs/:runId/files",
     async (req, reply) => {
@@ -471,4 +623,20 @@ async function readFileSafely(path: string): Promise<Buffer | null> {
   } catch {
     return null;
   }
+}
+
+function serializeWorkflow(
+  wf: ReturnType<WorkflowStore["get"]> & object,
+): Record<string, unknown> {
+  return {
+    id: wf.id,
+    name: wf.name,
+    description: wf.description,
+    graph: wf.graph,
+    origin: wf.origin,
+    isPrivate: wf.isPrivate,
+    scheduleCron: wf.scheduleCron,
+    serverSyncedAt: wf.serverSyncedAt,
+    localUpdatedAt: wf.localUpdatedAt,
+  };
 }

@@ -5,6 +5,9 @@ import { ApiClient } from "./api/client.js";
 import { PairingService } from "./auth/pairing.js";
 import { TokenManager } from "./auth/tokens.js";
 import { CredentialStore } from "./credentials/store.js";
+import { WorkflowStore } from "./workflows/store.js";
+import { WorkflowSync } from "./workflows/sync.js";
+import { LocalWorkflowRunner } from "./workflows/runner.js";
 import { EventQueue } from "./telemetry/queue.js";
 import { TelemetryClient } from "./telemetry/client.js";
 import { ScratchManager } from "./runtime/scratch.js";
@@ -42,6 +45,10 @@ export async function startRunner(): Promise<Runner> {
   const credentials = new CredentialStore(paths(cfg).sqlite, secrets);
   await credentials.init();
 
+  const workflowStore = new WorkflowStore(credentials.rawDb());
+  workflowStore.init();
+  const workflowSync = new WorkflowSync(api, tokens, workflowStore, log);
+
   const queue = new EventQueue(credentials.rawDb());
   const telemetry = new TelemetryClient(queue, api, log);
 
@@ -64,6 +71,7 @@ export async function startRunner(): Promise<Runner> {
     browserWorker,
   );
   const catalogue = new ToolCatalogue(api, tokens, log);
+  const localWorkflowRunner = new LocalWorkflowRunner(executor, catalogue, tokens, scratch, log);
 
   telemetry.start();
 
@@ -77,7 +85,21 @@ export async function startRunner(): Promise<Runner> {
     scratch,
     catalogue,
     api,
+    workflowStore,
+    workflowSync,
+    localWorkflowRunner,
   });
+
+  // Best-effort sync on startup. Failures are logged inside WorkflowSync —
+  // the runner stays usable even if the website is unreachable.
+  void workflowSync
+    .sync()
+    .then((result) => {
+      if (result.pulled > 0 || result.pushed > 0) {
+        log.info(result, "initial workflow sync complete");
+      }
+    })
+    .catch((err) => log.warn({ err }, "initial workflow sync threw"));
 
   let poller: DispatchPoller | null = null;
   let wakeSocket: WakeSocket | null = null;

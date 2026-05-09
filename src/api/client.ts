@@ -22,6 +22,22 @@ export interface CatalogueEntry {
   encrypted: boolean;
 }
 
+/**
+ * Shape of a workflow row as returned by the website's
+ * /api/orchestrator/workflows endpoint. Mirrors the public.workflows columns
+ * — only the subset we sync. updated_at is an ISO string.
+ */
+export interface RemoteWorkflowRow {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  graph: { nodes: unknown[]; edges: unknown[] };
+  schedule_cron: string | null;
+  visibility: "private" | "team";
+  updated_at: string;
+}
+
 interface BeginPairInput {
   pendingId: string;
   publicKey: string;
@@ -147,6 +163,89 @@ export class ApiClient {
       throw new ApiError(res.statusCode, text);
     }
     return (await res.body.json()) as { tools: CatalogueEntry[]; generatedAt: number };
+  }
+
+  /**
+   * Workflow CRUD against the website's existing /api/orchestrator/workflows
+   * routes. The runner's WorkflowSync uses these to pull server-side workflows
+   * into local storage and push locally-created drafts up as private workflows.
+   *
+   * The website routes accept either a next-auth session (browser) or a
+   * runner Bearer access JWT — see resolveUserEmail() in those routes.
+   */
+  async listServerWorkflows(accessJwt: string): Promise<RemoteWorkflowRow[]> {
+    const url = `${this.apiBase}/api/orchestrator/workflows`;
+    const res = await this.bearerGet(url, accessJwt);
+    const json = (await res.body.json()) as { rows: RemoteWorkflowRow[] };
+    return json.rows ?? [];
+  }
+
+  async createServerWorkflow(
+    accessJwt: string,
+    body: {
+      name: string;
+      description: string;
+      graph: unknown;
+      scheduleCron?: string | null;
+      visibility?: "private" | "team";
+    },
+  ): Promise<{ id: string }> {
+    const url = `${this.apiBase}/api/orchestrator/workflows`;
+    const res = await this.bearerJson(url, "POST", accessJwt, body);
+    const json = (await res.body.json()) as { workflow?: { id: string }; error?: string };
+    if (!json.workflow) {
+      throw new Error(json.error ?? "createServerWorkflow returned no workflow");
+    }
+    return json.workflow;
+  }
+
+  async patchServerWorkflow(
+    accessJwt: string,
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<void> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(id)}`;
+    await this.bearerJson(url, "PATCH", accessJwt, body);
+  }
+
+  async deleteServerWorkflow(accessJwt: string, id: string): Promise<void> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(id)}`;
+    const res = await request(url, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessJwt}` },
+    });
+    if (res.statusCode >= 300) {
+      const text = await res.body.text();
+      throw new ApiError(res.statusCode, text);
+    }
+  }
+
+  private async bearerGet(url: string, accessJwt: string) {
+    const res = await request(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${accessJwt}` },
+    });
+    if (res.statusCode >= 300) {
+      const text = await res.body.text();
+      throw new ApiError(res.statusCode, text);
+    }
+    return res;
+  }
+
+  private async bearerJson(url: string, method: string, accessJwt: string, body: unknown) {
+    const res = await request(url, {
+      method,
+      headers: {
+        authorization: `Bearer ${accessJwt}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.statusCode >= 300) {
+      const text = await res.body.text();
+      throw new ApiError(res.statusCode, text);
+    }
+    return res;
   }
 
   async postEvents(

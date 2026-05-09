@@ -15,6 +15,9 @@ import type { TelemetryClient } from "../telemetry/client.js";
 import type { ScratchManager } from "../runtime/scratch.js";
 import type { ToolCatalogue } from "../runtime/tool-catalogue.js";
 import type { ApiClient } from "../api/client.js";
+import type { WorkflowStore } from "../workflows/store.js";
+import type { WorkflowSync } from "../workflows/sync.js";
+import type { LocalWorkflowRunner } from "../workflows/runner.js";
 
 const PAIRING_TOKEN_FILE = "pairing-token";
 
@@ -35,6 +38,9 @@ interface BootOptions {
   scratch: ScratchManager;
   catalogue: ToolCatalogue;
   api: ApiClient;
+  workflowStore: WorkflowStore;
+  workflowSync: WorkflowSync;
+  localWorkflowRunner: LocalWorkflowRunner;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -79,6 +85,9 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     scratch: opts.scratch,
     catalogue: opts.catalogue,
     api: opts.api,
+    workflowStore: opts.workflowStore,
+    workflowSync: opts.workflowSync,
+    localWorkflowRunner: opts.localWorkflowRunner,
     log: opts.log,
     pairingToken,
   });
