@@ -178,6 +178,9 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "markdown-to-pdf": { module: "markdown-to-pdf", npmDeps: ["marked", "playwright"] },
   "md-to-pdf-academic": { module: "md-to-pdf-academic", npmDeps: ["marked", "playwright"] },
   "md-to-pdf-modern": { module: "md-to-pdf-modern", npmDeps: ["marked", "playwright"] },
+  // Sharp pack — image processing.
+  "image-resizer": { module: "image-resizer", npmDeps: ["sharp"] },
+  "image-upscaler": { module: "image-upscaler", npmDeps: ["sharp"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

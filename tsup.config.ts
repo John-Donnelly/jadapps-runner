@@ -138,6 +138,8 @@ export default defineConfig({
     "builtin-connectors/markdown-to-pdf": "src/builtin-connectors/markdown-to-pdf.ts",
     "builtin-connectors/md-to-pdf-academic": "src/builtin-connectors/md-to-pdf-academic.ts",
     "builtin-connectors/md-to-pdf-modern": "src/builtin-connectors/md-to-pdf-modern.ts",
+    "builtin-connectors/image-resizer": "src/builtin-connectors/image-resizer.ts",
+    "builtin-connectors/image-upscaler": "src/builtin-connectors/image-upscaler.ts",
   },
   format: ["esm"],
   target: "node20",
