@@ -4,6 +4,7 @@ export type Runtime =
   | "browser"
   | "runner-local"
   | "runner-native"
+  | "runner-builtin"
   | "runner-via-server";
 
 export interface RunToken {

@@ -8,6 +8,7 @@ import type { BundleLoader } from "./bundle-loader.js";
 import type { WorkerPool } from "./worker-pool.js";
 import type { ScratchManager } from "./scratch.js";
 import { decideRuntime } from "./router.js";
+import { resolveBuiltinModulePath } from "./builtin-tools.js";
 
 interface ExecuteInput {
   runToken: RunToken;
@@ -46,10 +47,6 @@ export class Executor {
       if (decision.runtime === "runner-via-server") {
         result = await this.api.executeServerSide(step, runToken.jwt);
       } else {
-        const bundleRef = runToken.tools[decision.bundleIndex];
-        if (!bundleRef) throw new Error(`no bundle for step ${step.stepIndex}`);
-        const access = await this.tokens.getAccessToken();
-        const loaded = await this.bundles.load(bundleRef, access.jwt);
         const creds: Record<string, Credential> = {};
         for (const ref of step.credentialRefs) {
           const c = this.credentials.get(ref);
@@ -57,14 +54,36 @@ export class Executor {
           creds[ref] = c;
         }
         const scratchDir = this.scratch.acquire(step.runId);
-        result = await this.workers.exec(
-          { modulePath: loaded.modulePath, toolId: loaded.toolId, scratchDir },
-          step.inputs,
-          step.fileRefs,
-          creds,
-          (bytes) =>
-            this.emit(runToken, step.runId, "step_progress", step.stepIndex, bytes, decision.runtime),
-        );
+
+        // Built-in tools ship inside the runner package — skip the bundle
+        // fetch/decrypt cycle entirely and resolve the module path locally.
+        if (decision.runtime === "runner-builtin") {
+          const modulePath = resolveBuiltinModulePath(step.toolId);
+          if (!modulePath) {
+            throw new Error(`built-in tool not found: ${step.toolId}`);
+          }
+          result = await this.workers.exec(
+            { modulePath, toolId: step.toolId, scratchDir },
+            step.inputs,
+            step.fileRefs,
+            creds,
+            (bytes) =>
+              this.emit(runToken, step.runId, "step_progress", step.stepIndex, bytes, decision.runtime),
+          );
+        } else {
+          const bundleRef = runToken.tools[decision.bundleIndex];
+          if (!bundleRef) throw new Error(`no bundle for step ${step.stepIndex}`);
+          const access = await this.tokens.getAccessToken();
+          const loaded = await this.bundles.load(bundleRef, access.jwt);
+          result = await this.workers.exec(
+            { modulePath: loaded.modulePath, toolId: loaded.toolId, scratchDir },
+            step.inputs,
+            step.fileRefs,
+            creds,
+            (bytes) =>
+              this.emit(runToken, step.runId, "step_progress", step.stepIndex, bytes, decision.runtime),
+          );
+        }
       }
 
       this.emit(
