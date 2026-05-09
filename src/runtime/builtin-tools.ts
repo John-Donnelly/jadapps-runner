@@ -181,6 +181,9 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   // Sharp pack — image processing.
   "image-resizer": { module: "image-resizer", npmDeps: ["sharp"] },
   "image-upscaler": { module: "image-upscaler", npmDeps: ["sharp"] },
+  // PDF specialty.
+  "pdf-compress-lossy": { module: "pdf-compress-lossy", npmDeps: ["pdfjs-dist", "@napi-rs/canvas", "pdf-lib", "sharp"] },
+  "pdf-font-subsetter": { module: "pdf-font-subsetter", npmDeps: ["pdf-lib", "pdfjs-dist", "@pdf-lib/fontkit"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
