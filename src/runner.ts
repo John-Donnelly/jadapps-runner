@@ -12,6 +12,7 @@ import { BundleLoader } from "./runtime/bundle-loader.js";
 import { WorkerPool } from "./runtime/worker-pool.js";
 import { Executor } from "./runtime/executor.js";
 import { ToolCatalogue } from "./runtime/tool-catalogue.js";
+import { BrowserWorker } from "./runtime/browser-worker.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
 import { DispatchPoller } from "./dispatch/poller.js";
 import { WakeSocket } from "./dispatch/wake-socket.js";
@@ -50,7 +51,18 @@ export async function startRunner(): Promise<Runner> {
 
   const bundles = new BundleLoader(api, log);
   const workers = new WorkerPool(log);
-  const executor = new Executor(log, api, tokens, credentials, telemetry, bundles, workers, scratch);
+  const browserWorker = new BrowserWorker(log, scratch);
+  const executor = new Executor(
+    log,
+    api,
+    tokens,
+    credentials,
+    telemetry,
+    bundles,
+    workers,
+    scratch,
+    browserWorker,
+  );
   const catalogue = new ToolCatalogue(api, tokens, log);
 
   telemetry.start();
@@ -82,7 +94,7 @@ export async function startRunner(): Promise<Runner> {
     }
   }
 
-  const shutdown = makeShutdown(log, server, telemetry, workers, bundles, poller, wakeSocket);
+  const shutdown = makeShutdown(log, server, telemetry, workers, bundles, browserWorker, poller, wakeSocket);
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
 
@@ -109,6 +121,7 @@ function makeShutdown(
   telemetry: TelemetryClient,
   workers: WorkerPool,
   bundles: BundleLoader,
+  browserWorker: BrowserWorker,
   poller: DispatchPoller | null,
   wakeSocket: WakeSocket | null,
 ): () => Promise<void> {
@@ -125,6 +138,7 @@ function makeShutdown(
       await server.shutdown();
       await workers.shutdown();
       bundles.shutdown();
+      await browserWorker.shutdown();
     } catch (err) {
       log.error({ err }, "error during shutdown");
     }

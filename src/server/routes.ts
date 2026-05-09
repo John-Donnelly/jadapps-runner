@@ -37,6 +37,7 @@ const RuntimeEnum = z.enum([
   "runner-local",
   "runner-native",
   "runner-builtin",
+  "browser-native",
   "runner-via-server",
 ]);
 

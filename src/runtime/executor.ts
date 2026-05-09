@@ -7,8 +7,10 @@ import type { Credential, RunToken, StepDescriptor, StepResult } from "../types.
 import type { BundleLoader } from "./bundle-loader.js";
 import type { WorkerPool } from "./worker-pool.js";
 import type { ScratchManager } from "./scratch.js";
+import type { BrowserWorker } from "./browser-worker.js";
 import { decideRuntime } from "./router.js";
 import { resolveBuiltinModulePath } from "./builtin-tools.js";
+import { readFileSync } from "node:fs";
 
 interface ExecuteInput {
   runToken: RunToken;
@@ -35,6 +37,7 @@ export class Executor {
     private readonly bundles: BundleLoader,
     private readonly workers: WorkerPool,
     private readonly scratch: ScratchManager,
+    private readonly browserWorker: BrowserWorker | null = null,
   ) {}
 
   async execute({ runToken, step }: ExecuteInput): Promise<StepResult> {
@@ -70,6 +73,30 @@ export class Executor {
             (bytes) =>
               this.emit(runToken, step.runId, "step_progress", step.stepIndex, bytes, decision.runtime),
           );
+        } else if (decision.runtime === "browser-native") {
+          // Browser-native tools execute in a headless Chromium page (Canvas,
+          // WebCodecs, Web Audio APIs). Bundle is fetched via the same loader,
+          // but we read the source string and pass it to the browser-worker
+          // rather than spawning a Node worker thread.
+          if (!this.browserWorker) {
+            throw new Error(
+              "browser-native runtime requested but BrowserWorker is not configured " +
+                "(install playwright to enable)",
+            );
+          }
+          const bundleRef = runToken.tools[decision.bundleIndex];
+          if (!bundleRef) throw new Error(`no bundle for step ${step.stepIndex}`);
+          const access = await this.tokens.getAccessToken();
+          const loaded = await this.bundles.load(bundleRef, access.jwt);
+          const bundleSource = readFileSync(loaded.modulePath, "utf8");
+          result = await this.browserWorker.dispatch({
+            toolId: loaded.toolId,
+            bundleSource,
+            inputs: step.inputs,
+            fileRefs: step.fileRefs,
+            credentials: creds,
+            scratchDir,
+          });
         } else {
           const bundleRef = runToken.tools[decision.bundleIndex];
           if (!bundleRef) throw new Error(`no bundle for step ${step.stepIndex}`);
