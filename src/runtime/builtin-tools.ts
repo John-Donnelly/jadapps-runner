@@ -42,6 +42,25 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "md-minifier": { module: "md-minifier", npmDeps: [] },
   "md-secret-redactor": { module: "md-secret-redactor", npmDeps: [] },
   "md-list-fixer": { module: "md-list-fixer", npmDeps: [] },
+  // Markdown family (batch 2 of 3) — pure-Node string transforms.
+  "md-prettifier": { module: "md-prettifier", npmDeps: [] },
+  "md-lint": { module: "md-lint", npmDeps: [] },
+  "md-diff": { module: "md-diff", npmDeps: [] },
+  "md-link-validator": { module: "md-link-validator", npmDeps: [] },
+  "md-from-text": { module: "md-from-text", npmDeps: [] },
+  "md-splitter": { module: "md-splitter", npmDeps: [] },
+  "md-table-repair": { module: "md-table-repair", npmDeps: [] },
+  "md-math-normalizer": { module: "md-math-normalizer", npmDeps: [] },
+  "md-code-block-tagger": { module: "md-code-block-tagger", npmDeps: [] },
+  "md-footnote-linker": { module: "md-footnote-linker", npmDeps: [] },
+  "md-ref-link-converter": { module: "md-ref-link-converter", npmDeps: [] },
+  "md-gfm-to-commonmark": { module: "md-gfm-to-commonmark", npmDeps: [] },
+  // Markdown family (batch 3 of 3) — uses `marked` for HTML/format conversion.
+  "md-to-html": { module: "md-to-html", npmDeps: ["marked"] },
+  "md-to-github-html": { module: "md-to-github-html", npmDeps: ["marked"] },
+  "md-to-reveal": { module: "md-to-reveal", npmDeps: ["marked"] },
+  "md-to-slack": { module: "md-to-slack", npmDeps: [] },
+  "md-to-jira": { module: "md-to-jira", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
