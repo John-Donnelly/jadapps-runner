@@ -20,6 +20,13 @@ export interface CatalogueEntry {
   bundleUrl: string;
   bundleSha256: string;
   encrypted: boolean;
+  /**
+   * Phase 12: per-bundle AES master key for encrypted envelopes. Server
+   * gates this behind the Bearer access JWT — same surface as bundle
+   * bytes, so no incremental risk over what's already in catalogue.
+   * Null for plaintext bundles (and runner-builtin tools).
+   */
+  decryptionKey?: string | null;
 }
 
 /**

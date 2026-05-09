@@ -262,7 +262,7 @@ export class LocalWorkflowRunner {
               toolId: entry.toolId,
               bundleUrl: entry.bundleUrl,
               bundleSha256: entry.bundleSha256,
-              decryptionKey: null,
+              decryptionKey: entry.decryptionKey ?? null,
               runtime: entry.runtime,
               ttlSec: 600,
             },

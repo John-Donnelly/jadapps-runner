@@ -298,7 +298,9 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
             toolId: entry.toolId,
             bundleUrl: entry.bundleUrl,
             bundleSha256: entry.bundleSha256,
-            decryptionKey: null,
+            // Phase 12: forward the per-bundle decryption key from the
+            // catalogue so encrypted envelopes work via slug dispatch.
+            decryptionKey: entry.decryptionKey ?? null,
             runtime: entry.runtime,
             ttlSec: 600,
           },

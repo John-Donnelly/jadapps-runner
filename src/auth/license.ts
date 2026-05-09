@@ -20,12 +20,21 @@ import type { Logger } from "../log.js";
  *     the cached token immediately.
  */
 
+/** Verification material the server pinned alongside the token. */
+export interface PinnedPublicKey {
+  alg: "EdDSA" | "HS256";
+  /** SPKI PEM for EdDSA; empty string for HS256 (verification stays in the cloud). */
+  publicKeyPem: string;
+}
+
 interface LicenseTokenPayload {
   licenseToken: string;
   expiresAt: number;
   tier: "developer" | "enterprise";
   features: ("mcp" | "api" | "workflow")[];
   jti: string;
+  /** Phase 12: present when issuer signs with EdDSA so the runner can pin verification material. */
+  publicKey?: PinnedPublicKey;
 }
 
 interface CachedLicense extends LicenseTokenPayload {
@@ -92,6 +101,16 @@ export class LicenseManager {
   async hasFeature(feature: "mcp" | "api" | "workflow"): Promise<boolean> {
     const lic = await this.getLicense();
     return !!lic && lic.features.includes(feature);
+  }
+
+  /**
+   * Phase 12 — exposes the pinned verification material so the Rust core
+   * (or future native verifiers) can validate license JWTs without the
+   * shared HMAC secret. Returns null when no license has been issued
+   * locally yet, or when the issuer falls back to HS256.
+   */
+  pinnedPublicKey(): PinnedPublicKey | null {
+    return this.cached?.publicKey ?? null;
   }
 
   /** Reports the most recent denial reason, if any. */
