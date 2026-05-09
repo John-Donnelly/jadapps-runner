@@ -61,6 +61,19 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "md-to-reveal": { module: "md-to-reveal", npmDeps: ["marked"] },
   "md-to-slack": { module: "md-to-slack", npmDeps: [] },
   "md-to-jira": { module: "md-to-jira", npmDeps: [] },
+  // Excel family (batch 1 of 3) — uses `exceljs` for .xlsx parse/write.
+  "excel-to-csv": { module: "excel-to-csv", npmDeps: ["exceljs"] },
+  "excel-to-json": { module: "excel-to-json", npmDeps: ["exceljs"] },
+  "excel-base64-encoder": { module: "excel-base64-encoder", npmDeps: [] },
+  "excel-format-inspector": { module: "excel-format-inspector", npmDeps: ["exceljs"] },
+  "excel-comment-purger": { module: "excel-comment-purger", npmDeps: ["exceljs"] },
+  "excel-app-metadata-wiper": { module: "excel-app-metadata-wiper", npmDeps: ["exceljs"] },
+  "excel-hidden-sheet-destroyer": { module: "excel-hidden-sheet-destroyer", npmDeps: ["exceljs"] },
+  "excel-vba-macro-stripper": { module: "excel-vba-macro-stripper", npmDeps: ["exceljs"] },
+  "excel-external-link-auditor": { module: "excel-external-link-auditor", npmDeps: ["exceljs"] },
+  "excel-formula-to-value": { module: "excel-formula-to-value", npmDeps: ["exceljs"] },
+  "excel-date-standardizer": { module: "excel-date-standardizer", npmDeps: ["exceljs"] },
+  "excel-regex-extractor": { module: "excel-regex-extractor", npmDeps: ["exceljs"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

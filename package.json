@@ -33,6 +33,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/ws": "^8.18.1",
     "better-sqlite3": "^11.3.0",
+    "exceljs": "^4.4.0",
     "commander": "^12.1.0",
     "fastify": "^5.0.0",
     "keytar": "^7.9.0",
