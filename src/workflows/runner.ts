@@ -12,6 +12,7 @@ import type {
   StepResult,
 } from "../types.js";
 import type { LocalWorkflow } from "./store.js";
+import { checkFamilyLimits } from "../runtime/tier-limits.js";
 
 /**
  * Local linear workflow runner. Walks the graph topologically and pipes
@@ -209,6 +210,30 @@ export class LocalWorkflowRunner {
             durationMs: 0,
             bytesProcessed: 0,
             error: `tool "${node.toolSlug}" has no runner bundle (browser-only fallback)`,
+          });
+          return {
+            runId,
+            ok: false,
+            steps,
+            durationMs: Date.now() - start,
+            totalBytes,
+          };
+        }
+
+        // Phase 9 pre-flight, Phase 11 deferred follow-up: closes the
+        // family-limit bypass that existed for workflow runs. Same checks
+        // /v1/tools/:slug/run and MCP `tool_run` apply — but here we
+        // surface the violation as a per-step error so the rest of the
+        // run can still report a clean trace.
+        const violation = checkFamilyLimits(access, entry, currentFiles);
+        if (violation) {
+          pushStep(stepIndex, {
+            nodeId: node.id,
+            toolSlug: node.toolSlug,
+            status: "error",
+            durationMs: 0,
+            bytesProcessed: 0,
+            error: `tier_limit_exceeded: ${violation.type} cap ${violation.value} (observed ${violation.observed})`,
           });
           return {
             runId,
