@@ -115,13 +115,19 @@ export class ApiClient {
       expiresAt: number;
       tier: AccessToken["tier"];
       limits: AccessToken["limits"];
+      familyLimits?: AccessToken["familyLimits"];
+      streaming?: AccessToken["streaming"];
     };
-    return {
+    const out: AccessToken = {
       jwt: res.accessToken,
       expiresAt: res.expiresAt,
+      sub: extractSubFromJwt(res.accessToken),
       tier: res.tier,
       limits: res.limits,
     };
+    if (res.familyLimits) out.familyLimits = res.familyLimits;
+    if (res.streaming) out.streaming = res.streaming;
+    return out;
   }
 
   async preflight(
@@ -521,6 +527,26 @@ export class ApiClient {
       throw new ApiError(res.statusCode, text);
     }
     return text ? JSON.parse(text) : {};
+  }
+}
+
+/**
+ * Pull the `sub` claim out of a JWT without verifying its signature. The
+ * runner only uses this for the concurrency-semaphore key — the website
+ * already verified the JWT before issuing it back, and a bad sub here just
+ * collides keys (worst case: one user's runs share a slot with another
+ * paired user's, which can't happen because the runner is single-user).
+ */
+function extractSubFromJwt(jwt: string): string {
+  const parts = jwt.split(".");
+  if (parts.length < 2) return "anonymous";
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1]!, "base64url").toString("utf8"),
+    ) as { sub?: unknown };
+    return typeof payload.sub === "string" ? payload.sub : "anonymous";
+  } catch {
+    return "anonymous";
   }
 }
 

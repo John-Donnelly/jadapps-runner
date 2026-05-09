@@ -5,6 +5,10 @@ import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpDeps } from "../server.js";
 import type { FileRef, RunToken, StepDescriptor } from "../../types.js";
+import {
+  checkFamilyLimits,
+  violationToHttpBody,
+} from "../../runtime/tier-limits.js";
 
 /**
  * MCP tools for direct tool dispatch — `tool_list` and `tool_run`.
@@ -112,6 +116,7 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
       const runId = randomUUID();
       const scratchDir = deps.scratch.acquire(runId);
       const fileRefs: FileRef[] = [];
+      let concurrencyAcquired = false;
 
       try {
         for (const file of files ?? []) {
@@ -128,6 +133,43 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
             filename: file.filename,
           });
         }
+
+        // Phase 9 pre-flight — same checks the HTTP slug-dispatch route does,
+        // so MCP clients can't bypass tier-limit enforcement.
+        const violation = checkFamilyLimits(access, entry, fileRefs);
+        if (violation) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(violationToHttpBody(violation), null, 2),
+              },
+            ],
+          };
+        }
+
+        const permits = access.streaming?.batchMaxParallel ?? 0;
+        if (!deps.concurrency.tryAcquire(access.sub, permits)) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    error: "tier_limit_exceeded",
+                    limit: { type: "concurrency", value: permits },
+                    upgrade_url: "https://jadapps.app/pricing",
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+        concurrencyAcquired = true;
 
         const inputs = { ...(options ?? {}) };
         if (text != null) inputs.text = inputs.text ?? text;
@@ -227,6 +269,7 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
         return { content };
       } finally {
         deps.scratch.release(runId);
+        if (concurrencyAcquired) deps.concurrency.release(access.sub);
       }
     },
   );

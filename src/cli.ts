@@ -221,6 +221,7 @@ program
       localWorkflowRunner: runner.localWorkflowRunner,
       api: runner.api,
       eventQueue: runner.eventQueue,
+      concurrency: runner.concurrency,
     });
 
     const transport = new StdioServerTransport();

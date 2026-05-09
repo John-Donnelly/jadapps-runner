@@ -16,6 +16,7 @@ import { WorkerPool } from "./runtime/worker-pool.js";
 import { Executor } from "./runtime/executor.js";
 import { ToolCatalogue } from "./runtime/tool-catalogue.js";
 import { BrowserWorker } from "./runtime/browser-worker.js";
+import { ConcurrencyLimiter } from "./runtime/concurrency.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
 import { DispatchPoller } from "./dispatch/poller.js";
 import { WakeSocket } from "./dispatch/wake-socket.js";
@@ -41,6 +42,7 @@ export interface Runner {
   localWorkflowRunner: LocalWorkflowRunner;
   api: ApiClient;
   eventQueue: EventQueue;
+  concurrency: ConcurrencyLimiter;
 }
 
 /** Wire the dependency graph and start the local HTTP server. */
@@ -83,6 +85,7 @@ export async function startRunner(): Promise<Runner> {
     browserWorker,
   );
   const catalogue = new ToolCatalogue(api, tokens, log);
+  const concurrency = new ConcurrencyLimiter();
   const localWorkflowRunner = new LocalWorkflowRunner(executor, catalogue, tokens, scratch, log);
 
   telemetry.start();
@@ -101,6 +104,7 @@ export async function startRunner(): Promise<Runner> {
     workflowSync,
     localWorkflowRunner,
     eventQueue: queue,
+    concurrency,
   });
 
   // Best-effort sync on startup. Failures are logged inside WorkflowSync —
@@ -157,6 +161,7 @@ export async function startRunner(): Promise<Runner> {
     localWorkflowRunner,
     api,
     eventQueue: queue,
+    concurrency,
   };
 }
 

@@ -17,6 +17,11 @@ import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { Logger } from "../log.js";
 import type { FileRef, RunToken, StepDescriptor } from "../types.js";
+import {
+  checkFamilyLimits,
+  violationToHttpBody,
+} from "../runtime/tier-limits.js";
+import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
 
 const StepSchema = z.object({
   runId: z.string().min(1),
@@ -83,6 +88,7 @@ interface Deps {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  concurrency: ConcurrencyLimiter;
   log: Logger;
   pairingToken: string;
 }
@@ -243,6 +249,30 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
         options.text = options.text ?? text;
       }
 
+      // Phase 9: per-family tier-limit pre-flight. We check now (after
+      // parsing files so byte counts are known) but before calling the
+      // executor — failed checks return 429 instead of running the tool.
+      const violation = checkFamilyLimits(access, entry, fileRefs);
+      if (violation) {
+        deps.scratch.release(runId);
+        reply.code(429).send(violationToHttpBody(violation));
+        return;
+      }
+
+      // Phase 9: per-user concurrency cap. The semaphore key is the user's
+      // sub claim; permit count comes from the streaming claims (0 = unlimited).
+      const permits = access.streaming?.batchMaxParallel ?? 0;
+      const acquired = deps.concurrency.tryAcquire(access.sub, permits);
+      if (!acquired) {
+        deps.scratch.release(runId);
+        reply.code(429).send({
+          error: "tier_limit_exceeded",
+          limit: { type: "concurrency", value: permits },
+          upgrade_url: "https://jadapps.app/pricing",
+        });
+        return;
+      }
+
       // Build a synthetic single-step runToken for ad-hoc dispatch. No
       // workflow run is created server-side — this is a one-shot tool call.
       const runToken: RunToken = {
@@ -278,73 +308,76 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
         credentialRefs: extractCredentialRefs(options),
       };
 
-      const result = await deps.executor.execute({ runToken, step });
+      try {
+        const result = await deps.executor.execute({ runToken, step });
 
-      // For successful runs that produced output files (returned via fileRefs
-      // on the StepResult), copy the first one to the user's outputs dir and
-      // surface its absolute path as outputPath. This matches the website's
-      // RunnerJobResult contract.
-      const outDir = outputsDirFor(runId);
-      let outputPath = "";
-      let filename = "";
-      let mimeType = "application/json";
-      let sizeBytes = 0;
-      let inlineText: string | undefined;
+        // For successful runs that produced output files (returned via fileRefs
+        // on the StepResult), copy the first one to the user's outputs dir and
+        // surface its absolute path as outputPath. This matches the website's
+        // RunnerJobResult contract.
+        const outDir = outputsDirFor(runId);
+        let outputPath = "";
+        let filename = "";
+        let mimeType = "application/json";
+        let sizeBytes = 0;
+        let inlineText: string | undefined;
 
-      if (result.ok && result.fileRefs.length > 0) {
-        const primary = result.fileRefs[0]!;
-        await mkdir(outDir, { recursive: true });
-        const target = join(outDir, primary.filename);
-        try {
-          // primary.ref is the scratch path within the runId's scratch dir
-          const src = deps.scratch.resolve(runId, primary.ref);
-          const buf = await readFileSafely(src);
-          if (buf) {
-            await writeFile(target, buf);
-            outputPath = target;
-            filename = primary.filename;
-            mimeType = primary.mime;
-            sizeBytes = buf.length;
+        if (result.ok && result.fileRefs.length > 0) {
+          const primary = result.fileRefs[0]!;
+          await mkdir(outDir, { recursive: true });
+          const target = join(outDir, primary.filename);
+          try {
+            // primary.ref is the scratch path within the runId's scratch dir
+            const src = deps.scratch.resolve(runId, primary.ref);
+            const buf = await readFileSafely(src);
+            if (buf) {
+              await writeFile(target, buf);
+              outputPath = target;
+              filename = primary.filename;
+              mimeType = primary.mime;
+              sizeBytes = buf.length;
+            }
+          } catch (err) {
+            deps.log.warn({ err, primary }, "could not save output to user dir");
           }
-        } catch (err) {
-          deps.log.warn({ err, primary }, "could not save output to user dir");
         }
-      }
 
-      // Text outputs (no files): surface inlineText so the client can show it
-      // without having to read from disk.
-      if (result.ok && result.fileRefs.length === 0) {
-        const out = result.outputs?.text;
-        if (typeof out === "string") {
-          inlineText = out;
-          sizeBytes = Buffer.byteLength(out, "utf8");
+        // Text outputs (no files): surface inlineText so the client can show it
+        // without having to read from disk.
+        if (result.ok && result.fileRefs.length === 0) {
+          const out = result.outputs?.text;
+          if (typeof out === "string") {
+            inlineText = out;
+            sizeBytes = Buffer.byteLength(out, "utf8");
+          }
         }
-      }
 
-      // Release the scratch dir — outputs were copied above, no need to keep
-      // intermediate files around past the run.
-      deps.scratch.release(runId);
+        if (!result.ok) {
+          reply.code(422).send({
+            error: result.error?.code ?? "tool_failed",
+            message: result.error?.message ?? "tool execution failed",
+            outputs: result.outputs,
+          });
+          return;
+        }
 
-      if (!result.ok) {
-        reply.code(422).send({
-          error: result.error?.code ?? "tool_failed",
-          message: result.error?.message ?? "tool execution failed",
+        return {
+          outputPath,
+          filename,
+          mimeType,
+          sizeBytes,
+          durationMs: result.durationMs,
+          metrics: extractMetrics(result.outputs),
+          inlineText,
+          mode: entry.runtime === "runner-native" ? "headless-browser" : "engine",
           outputs: result.outputs,
-        });
-        return;
+        };
+      } finally {
+        // Release scratch dir + concurrency permit unconditionally so a
+        // crashing tool can't leak either resource.
+        deps.scratch.release(runId);
+        deps.concurrency.release(access.sub);
       }
-
-      return {
-        outputPath,
-        filename,
-        mimeType,
-        sizeBytes,
-        durationMs: result.durationMs,
-        metrics: extractMetrics(result.outputs),
-        inlineText,
-        mode: entry.runtime === "runner-native" ? "headless-browser" : "engine",
-        outputs: result.outputs,
-      };
     },
   );
 

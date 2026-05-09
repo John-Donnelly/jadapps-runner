@@ -62,15 +62,73 @@ export interface DeviceIdentity {
   apiBase: string;
 }
 
+export type ToolFamily =
+  | "csv"
+  | "json"
+  | "pdf"
+  | "image"
+  | "audio"
+  | "video"
+  | "markdown"
+  | "excel"
+  | "security"
+  | "svg"
+  | "3d"
+  | "font"
+  | "archive";
+
+/**
+ * Per-family limits as embedded in the AccessClaims JWT. Matches the
+ * shape produced by /api/runner/token at sign time. The runner pre-flights
+ * each dispatch against the matching family entry — anything missing from
+ * a family's record is treated as "unlimited" rather than rejected.
+ */
+export type TierFamilyLimits = Partial<
+  Record<
+    ToolFamily,
+    {
+      fileBytes?: number;
+      rowLimit?: number;
+      pageLimit?: number;
+      pixelLimit?: number;
+      durationMin?: number;
+      charLimit?: number;
+      vertexLimit?: number;
+      glyphLimit?: number;
+      entryLimit?: number;
+      batchFiles?: number;
+    }
+  >
+>;
+
+export interface StreamingClaims {
+  /** 0 means streaming is disabled for the tier (free). */
+  streamingMaxBytes: number;
+  /** Max simultaneous worker jobs. Drives the per-user concurrency semaphore. */
+  batchMaxParallel: number;
+}
+
 export interface AccessToken {
   jwt: string;
   expiresAt: number;
+  /**
+   * The user identifier extracted from the JWT's `sub` claim. The runner
+   * uses this as the concurrency-semaphore key so each paired account gets
+   * its own bucket. Decoded locally — the server already verified it.
+   */
+  sub: string;
   tier: Tier;
   limits: {
     maxBytesPerRun: number;
     maxConcurrentRuns: number;
     monthlyByteBudget: number;
   };
+  /**
+   * Per-family limits, populated by Phase 9 servers. Older servers omit
+   * this; the runner's pre-flight skips when missing rather than failing.
+   */
+  familyLimits?: TierFamilyLimits;
+  streaming?: StreamingClaims;
 }
 
 export interface TelemetryEvent {
