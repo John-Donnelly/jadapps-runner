@@ -144,6 +144,14 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-table-to-json": { module: "pdf-table-to-json", npmDeps: ["pdfjs-dist"] },
   "pdf-summary-generator": { module: "pdf-summary-generator", npmDeps: ["pdfjs-dist"] },
   "pdf-version-converter": { module: "pdf-version-converter", npmDeps: [] },
+  // Other family (with deps) — pdf-lib signing, steganography, jszip, exifr, openpgp.
+  "signature-burner": { module: "signature-burner", npmDeps: ["pdf-lib"] },
+  "steganography-encoder": { module: "steganography-encoder", npmDeps: [] },
+  "steganography-decoder": { module: "steganography-decoder", npmDeps: [] },
+  "office-doc-property-wiper": { module: "office-doc-property-wiper", npmDeps: ["jszip"] },
+  "pgp-message-signer": { module: "pgp-message-signer", npmDeps: ["openpgp"] },
+  "exif-map-previewer": { module: "exif-map-previewer", npmDeps: ["exifr"] },
+  "hidden-thumbnail-extractor": { module: "hidden-thumbnail-extractor", npmDeps: ["exifr"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
