@@ -96,6 +96,17 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-annotation-remover": { module: "pdf-annotation-remover", npmDeps: ["pdf-lib"] },
   "pdf-flatten": { module: "pdf-flatten", npmDeps: ["pdf-lib"] },
   "pdf-stamp": { module: "pdf-stamp", npmDeps: ["pdf-lib"] },
+  // Excel family (batch 2 of 3) — analysis and transform tools.
+  "excel-circular-ref-finder": { module: "excel-circular-ref-finder", npmDeps: ["exceljs"] },
+  "excel-error-locator": { module: "excel-error-locator", npmDeps: ["exceljs"] },
+  "excel-formula-highlighter": { module: "excel-formula-highlighter", npmDeps: ["exceljs"] },
+  "excel-conditional-splitter": { module: "excel-conditional-splitter", npmDeps: ["exceljs"] },
+  "excel-sheet-joiner": { module: "excel-sheet-joiner", npmDeps: ["exceljs"] },
+  "excel-unpivot": { module: "excel-unpivot", npmDeps: ["exceljs"] },
+  "excel-range-diff": { module: "excel-range-diff", npmDeps: ["exceljs"] },
+  "excel-unit-converter": { module: "excel-unit-converter", npmDeps: ["exceljs"] },
+  "excel-fuzzy-dedup": { module: "excel-fuzzy-dedup", npmDeps: ["exceljs"] },
+  "excel-fuzzy-merger": { module: "excel-fuzzy-merger", npmDeps: ["exceljs"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
