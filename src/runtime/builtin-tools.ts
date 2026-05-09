@@ -234,6 +234,11 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "audio-transcribe": { module: "audio-transcribe", npmDeps: [] },
   "pii-redactor": { module: "pii-redactor", npmDeps: [] },
   "podcast-master": { module: "podcast-master", npmDeps: [] },
+  // Video family — ffmpeg-only, completes the family.
+  "h265-encoder": { module: "h265-encoder", npmDeps: [] },
+  "av1-encoder": { module: "av1-encoder", npmDeps: [] },
+  "face-blur": { module: "face-blur", npmDeps: [] },
+  "face-pixelate": { module: "face-pixelate", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
