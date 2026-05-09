@@ -219,6 +219,7 @@ program
       workflowStore: runner.workflowStore,
       workflowSync: runner.workflowSync,
       localWorkflowRunner: runner.localWorkflowRunner,
+      api: runner.api,
     });
 
     const transport = new StdioServerTransport();

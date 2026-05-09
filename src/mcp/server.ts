@@ -8,8 +8,10 @@ import type { ScratchManager } from "../runtime/scratch.js";
 import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
+import type { ApiClient } from "../api/client.js";
 import { registerToolTools } from "./tools/tool.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
+import { registerLifecycleTools } from "./tools/lifecycle.js";
 import { registerCredentialTools } from "./tools/credential.js";
 import { registerRunnerTools } from "./tools/runner.js";
 import { registerResources } from "./resources.js";
@@ -25,6 +27,7 @@ export interface McpDeps {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  api: ApiClient;
 }
 
 export const SERVER_INFO = {
@@ -58,6 +61,7 @@ export function createMcpServer(deps: McpDeps): McpServer {
 
   registerToolTools(server, deps);
   registerWorkflowTools(server, deps);
+  registerLifecycleTools(server, deps);
   registerCredentialTools(server, deps);
   registerRunnerTools(server, deps);
   registerResources(server, deps);

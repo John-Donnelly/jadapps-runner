@@ -220,6 +220,68 @@ export class ApiClient {
     }
   }
 
+  /**
+   * Workflow lifecycle methods — publish a draft, rollback to a prior
+   * version, cancel/resume runs. All use Bearer access JWT.
+   */
+  async publishWorkflow(
+    accessJwt: string,
+    workflowId: string,
+    comment?: string,
+  ): Promise<{ versionId: string; versionNumber: number }> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(workflowId)}/publish`;
+    const res = await this.bearerJson(url, "POST", accessJwt, comment ? { comment } : {});
+    return (await res.body.json()) as { versionId: string; versionNumber: number };
+  }
+
+  async rollbackWorkflow(
+    accessJwt: string,
+    workflowId: string,
+    versionId: string,
+  ): Promise<{ rolledBackFrom: number; newVersionId: string; newVersionNumber: number }> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(workflowId)}/versions/${encodeURIComponent(versionId)}/rollback`;
+    const res = await this.bearerJson(url, "POST", accessJwt, {});
+    return (await res.body.json()) as {
+      rolledBackFrom: number;
+      newVersionId: string;
+      newVersionNumber: number;
+    };
+  }
+
+  async cancelRun(accessJwt: string, runId: string): Promise<{ ok: boolean; status: string }> {
+    const url = `${this.apiBase}/api/orchestrator/runs/${encodeURIComponent(runId)}/cancel`;
+    const res = await this.bearerJson(url, "POST", accessJwt, {});
+    return (await res.body.json()) as { ok: boolean; status: string };
+  }
+
+  async resumeRun(
+    accessJwt: string,
+    runId: string,
+  ): Promise<{ ok: boolean; status: string; resumeUrl: string }> {
+    const url = `${this.apiBase}/api/orchestrator/runs/${encodeURIComponent(runId)}/resume`;
+    const res = await this.bearerJson(url, "POST", accessJwt, {});
+    return (await res.body.json()) as { ok: boolean; status: string; resumeUrl: string };
+  }
+
+  async getRunTrace(accessJwt: string, runId: string): Promise<unknown> {
+    const url = `${this.apiBase}/api/orchestrator/runs/${encodeURIComponent(runId)}/trace`;
+    const res = await this.bearerGet(url, accessJwt);
+    return await res.body.json();
+  }
+
+  async enqueueWorkflow(
+    accessJwt: string,
+    workflowId: string,
+    payload?: Record<string, unknown>,
+  ): Promise<{ queueId: string; status: string }> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(workflowId)}/enqueue`;
+    const res = await this.bearerJson(url, "POST", accessJwt, {
+      source: "mcp",
+      ...(payload ? { payload } : {}),
+    });
+    return (await res.body.json()) as { queueId: string; status: string };
+  }
+
   private async bearerGet(url: string, accessJwt: string) {
     const res = await request(url, {
       method: "GET",

@@ -39,6 +39,7 @@ export interface Runner {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  api: ApiClient;
 }
 
 /** Wire the dependency graph and start the local HTTP server. */
@@ -152,6 +153,7 @@ export async function startRunner(): Promise<Runner> {
     workflowStore,
     workflowSync,
     localWorkflowRunner,
+    api,
   };
 }
 

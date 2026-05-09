@@ -105,6 +105,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     workflowStore: opts.workflowStore,
     workflowSync: opts.workflowSync,
     localWorkflowRunner: opts.localWorkflowRunner,
+    api: opts.api,
   });
 
   await app.listen({ host: opts.cfg.host, port: opts.cfg.port });
