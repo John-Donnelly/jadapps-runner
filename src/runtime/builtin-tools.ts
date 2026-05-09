@@ -141,6 +141,9 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-to-markdown": { module: "pdf-to-markdown", npmDeps: ["pdfjs-dist"] },
   "pdf-to-html": { module: "pdf-to-html", npmDeps: ["pdfjs-dist"] },
   "pdf-to-chunks": { module: "pdf-to-chunks", npmDeps: ["pdfjs-dist"] },
+  "pdf-table-to-json": { module: "pdf-table-to-json", npmDeps: ["pdfjs-dist"] },
+  "pdf-summary-generator": { module: "pdf-summary-generator", npmDeps: ["pdfjs-dist"] },
+  "pdf-version-converter": { module: "pdf-version-converter", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
