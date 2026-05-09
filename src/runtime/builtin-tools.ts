@@ -160,6 +160,11 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-to-excel": { module: "pdf-to-excel", npmDeps: ["pdfjs-dist", "exceljs"] },
   "pdf-to-word": { module: "pdf-to-word", npmDeps: ["pdfjs-dist", "docx"] },
   "svg-to-pdf": { module: "svg-to-pdf", npmDeps: ["pdf-lib"] },
+  // Canvas pack — pdfjs + @napi-rs/canvas for rasterise.
+  "pdf-to-png": { module: "pdf-to-png", npmDeps: ["pdfjs-dist", "@napi-rs/canvas"] },
+  "pdf-to-jpg": { module: "pdf-to-jpg", npmDeps: ["pdfjs-dist", "@napi-rs/canvas"] },
+  "pdf-to-image-strip": { module: "pdf-to-image-strip", npmDeps: ["pdfjs-dist", "@napi-rs/canvas"] },
+  "pdf-grayscale": { module: "pdf-grayscale", npmDeps: ["pdfjs-dist", "@napi-rs/canvas", "pdf-lib"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
