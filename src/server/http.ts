@@ -19,6 +19,7 @@ import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
+import type { LicenseManager } from "../auth/license.js";
 import { mountMcpHttp } from "../mcp/http-transport.js";
 
 const PAIRING_TOKEN_FILE = "pairing-token";
@@ -45,6 +46,7 @@ interface BootOptions {
   localWorkflowRunner: LocalWorkflowRunner;
   eventQueue: import("../telemetry/queue.js").EventQueue;
   concurrency: ConcurrencyLimiter;
+  license: LicenseManager;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -112,6 +114,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     api: opts.api,
     eventQueue: opts.eventQueue,
     concurrency: opts.concurrency,
+    license: opts.license,
   });
 
   await app.listen({ host: opts.cfg.host, port: opts.cfg.port });

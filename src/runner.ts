@@ -4,6 +4,7 @@ import { SecretStore } from "./auth/keychain.js";
 import { ApiClient } from "./api/client.js";
 import { PairingService } from "./auth/pairing.js";
 import { TokenManager } from "./auth/tokens.js";
+import { LicenseManager } from "./auth/license.js";
 import { CredentialStore } from "./credentials/store.js";
 import { WorkflowStore } from "./workflows/store.js";
 import { WorkflowSync } from "./workflows/sync.js";
@@ -43,6 +44,7 @@ export interface Runner {
   api: ApiClient;
   eventQueue: EventQueue;
   concurrency: ConcurrencyLimiter;
+  license: LicenseManager;
 }
 
 /** Wire the dependency graph and start the local HTTP server. */
@@ -55,6 +57,7 @@ export async function startRunner(): Promise<Runner> {
   const api = new ApiClient(cfg.apiBase, log);
   const pairing = new PairingService(cfg, secrets, api);
   const tokens = new TokenManager(api, pairing);
+  const license = new LicenseManager(api, tokens, log);
 
   const credentials = new CredentialStore(paths(cfg).sqlite, secrets);
   await credentials.init();
@@ -105,6 +108,7 @@ export async function startRunner(): Promise<Runner> {
     localWorkflowRunner,
     eventQueue: queue,
     concurrency,
+    license,
   });
 
   // Best-effort sync on startup. Failures are logged inside WorkflowSync —
@@ -162,6 +166,7 @@ export async function startRunner(): Promise<Runner> {
     api,
     eventQueue: queue,
     concurrency,
+    license,
   };
 }
 

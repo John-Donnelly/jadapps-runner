@@ -207,9 +207,9 @@ program
     const { StdioServerTransport } = await import(
       "@modelcontextprotocol/sdk/server/stdio.js"
     );
-    const { createMcpServer } = await import("./mcp/server.js");
+    const { createMcpServer, checkMcpLicense } = await import("./mcp/server.js");
 
-    const mcpServer = createMcpServer({
+    const mcpDeps = {
       log: runner.log,
       executor: runner.executor,
       catalogue: runner.catalogue,
@@ -222,7 +222,21 @@ program
       api: runner.api,
       eventQueue: runner.eventQueue,
       concurrency: runner.concurrency,
-    });
+      license: runner.license,
+    };
+
+    // Phase 11 license gate — fail closed on stdio so AI clients see a
+    // clean error rather than a hung transport. Logs go to stderr (stdout
+    // is reserved for JSON-RPC framing once we connect).
+    const lic = await checkMcpLicense(mcpDeps);
+    if (!lic.ok) {
+      process.stderr.write(`MCP refused to start: ${lic.reason}\n`);
+      process.stderr.write(`Upgrade: ${lic.upgradeUrl}\n`);
+      await runner.shutdown();
+      process.exit(2);
+    }
+
+    const mcpServer = createMcpServer(mcpDeps);
 
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport as unknown as Parameters<typeof mcpServer.connect>[0]);

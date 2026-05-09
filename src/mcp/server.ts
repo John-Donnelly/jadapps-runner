@@ -11,6 +11,7 @@ import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { ApiClient } from "../api/client.js";
 import type { EventQueue } from "../telemetry/queue.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
+import type { LicenseManager } from "../auth/license.js";
 import { registerToolTools } from "./tools/tool.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerLifecycleTools } from "./tools/lifecycle.js";
@@ -34,12 +35,42 @@ export interface McpDeps {
   api: ApiClient;
   eventQueue: EventQueue;
   concurrency: ConcurrencyLimiter;
+  license: LicenseManager;
 }
 
 export const SERVER_INFO = {
   name: "jadapps-runner",
   version: "0.2.0",
 } as const;
+
+/**
+ * Phase 11 license gate. Verifies the runner has an active Developer or
+ * Enterprise license before letting MCP run. Used by both the stdio CLI
+ * (`jadapps-runner mcp`) and the HTTP transport (`/mcp` POST handler).
+ *
+ * Returns:
+ *   - `{ ok: true }` if a license token covering 'mcp' exists.
+ *   - `{ ok: false, ... }` with the user-visible upgrade reason otherwise.
+ *
+ * Callers convert the failure into either an exit (stdio) or a 403 with a
+ * readable JSON body (HTTP). Either way, no McpServer is constructed and
+ * no privileged code runs.
+ */
+export async function checkMcpLicense(deps: McpDeps): Promise<
+  | { ok: true }
+  | { ok: false; reason: string; upgradeUrl: string }
+> {
+  const allowed = await deps.license.hasFeature("mcp");
+  if (allowed) return { ok: true };
+  const denial = deps.license.permanentDenialReason();
+  return {
+    ok: false,
+    reason:
+      denial?.reason ??
+      "MCP requires a Developer or Enterprise license. Visit jadapps.app/pricing.",
+    upgradeUrl: denial?.upgradeUrl ?? "https://jadapps.app/pricing",
+  };
+}
 
 /**
  * Build a fresh McpServer with all JAD tools, resources, and prompts
@@ -49,6 +80,10 @@ export const SERVER_INFO = {
  *
  * Each transport call creates its own server instance so concurrent stdio +
  * HTTP clients can't bleed state into each other.
+ *
+ * Callers should run `checkMcpLicense(deps)` first — this function does
+ * NOT enforce the gate itself, so callers can shape the failure response
+ * for their transport.
  */
 export function createMcpServer(deps: McpDeps): McpServer {
   const server = new McpServer(SERVER_INFO, {

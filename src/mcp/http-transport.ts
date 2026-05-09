@@ -1,6 +1,6 @@
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { FastifyInstance } from "fastify";
-import { createMcpServer, type McpDeps } from "./server.js";
+import { checkMcpLicense, createMcpServer, type McpDeps } from "./server.js";
 
 /**
  * Mount the MCP server on the existing Fastify HTTP server at /mcp. Uses the
@@ -18,6 +18,19 @@ import { createMcpServer, type McpDeps } from "./server.js";
  */
 export async function mountMcpHttp(app: FastifyInstance, deps: McpDeps): Promise<void> {
   app.post("/mcp", async (req, reply) => {
+    // Phase 11 license gate. Refuse without a Developer/Enterprise license
+    // BEFORE constructing the McpServer so privileged tool registration
+    // doesn't run. The HTTP body is JSON the SDK clients can surface.
+    const lic = await checkMcpLicense(deps);
+    if (!lic.ok) {
+      reply.code(403).send({
+        error: "license_required",
+        message: lic.reason,
+        upgrade_url: lic.upgradeUrl,
+      });
+      return;
+    }
+
     // Omit sessionIdGenerator to opt into stateless mode per the SDK contract.
     const transport = new StreamableHTTPServerTransport({
       enableJsonResponse: true,

@@ -73,7 +73,7 @@ interface PollPairResult {
 
 export class ApiClient {
   constructor(
-    private readonly apiBase: string,
+    public readonly apiBase: string,
     private readonly log: Logger,
   ) {}
 
