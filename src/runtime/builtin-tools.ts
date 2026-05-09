@@ -118,6 +118,13 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "excel-python-gen": { module: "excel-python-gen", npmDeps: ["exceljs"] },
   "excel-trpc-router": { module: "excel-trpc-router", npmDeps: ["exceljs"] },
   "excel-weight-analyzer": { module: "excel-weight-analyzer", npmDeps: ["exceljs"] },
+  // PDF family (batch 2 of 3) — more pdf-lib operations.
+  "pdf-resize": { module: "pdf-resize", npmDeps: ["pdf-lib"] },
+  "pdf-crop": { module: "pdf-crop", npmDeps: ["pdf-lib"] },
+  "pdf-form-extractor": { module: "pdf-form-extractor", npmDeps: ["pdf-lib"] },
+  "pdf-compose": { module: "pdf-compose", npmDeps: ["pdf-lib"] },
+  "pdf-redact": { module: "pdf-redact", npmDeps: ["pdf-lib"] },
+  "pdf-pii-redactor": { module: "pdf-pii-redactor", npmDeps: ["pdf-lib"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
