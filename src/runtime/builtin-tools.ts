@@ -190,6 +190,8 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-sign": { module: "pdf-sign", npmDeps: ["pdf-lib", "@signpdf/signpdf", "@signpdf/signer-p12", "@signpdf/placeholder-pdf-lib"] },
   "pdf-digital-signature": { module: "pdf-digital-signature", npmDeps: ["pdf-lib", "@signpdf/signpdf", "@signpdf/signer-p12", "@signpdf/placeholder-pdf-lib"] },
   "pdf-to-pdfa": { module: "pdf-to-pdfa", npmDeps: [] },
+  // ML pack — final tool, ONNX-based U2-Net inference.
+  "background-remover": { module: "background-remover", npmDeps: ["@imgly/background-removal-node", "sharp"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

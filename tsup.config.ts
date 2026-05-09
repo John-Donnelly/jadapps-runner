@@ -147,6 +147,7 @@ export default defineConfig({
     "builtin-connectors/pdf-sign": "src/builtin-connectors/pdf-sign.ts",
     "builtin-connectors/pdf-digital-signature": "src/builtin-connectors/pdf-digital-signature.ts",
     "builtin-connectors/pdf-to-pdfa": "src/builtin-connectors/pdf-to-pdfa.ts",
+    "builtin-connectors/background-remover": "src/builtin-connectors/background-remover.ts",
   },
   format: ["esm"],
   target: "node20",

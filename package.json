@@ -37,6 +37,7 @@
     "@signpdf/signer-p12": "^3.2.4",
     "@signpdf/signpdf": "^3.2.4",
     "@types/ws": "^8.18.1",
+    "@imgly/background-removal-node": "^1.4.5",
     "dcmjs": "^0.39.0",
     "tesseract.js": "^5.1.1",
     "better-sqlite3": "^11.3.0",
