@@ -19,6 +19,7 @@ import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
+import type { RateLimiter } from "../runtime/rate-limit.js";
 import type { LicenseManager } from "../auth/license.js";
 import { mountMcpHttp } from "../mcp/http-transport.js";
 
@@ -47,6 +48,7 @@ interface BootOptions {
   eventQueue: import("../telemetry/queue.js").EventQueue;
   concurrency: ConcurrencyLimiter;
   license: LicenseManager;
+  rateLimiter: RateLimiter;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -95,6 +97,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     workflowSync: opts.workflowSync,
     localWorkflowRunner: opts.localWorkflowRunner,
     concurrency: opts.concurrency,
+    rateLimiter: opts.rateLimiter,
     log: opts.log,
     pairingToken,
   });
@@ -115,6 +118,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     eventQueue: opts.eventQueue,
     concurrency: opts.concurrency,
     license: opts.license,
+    rateLimiter: opts.rateLimiter,
   });
 
   await app.listen({ host: opts.cfg.host, port: opts.cfg.port });

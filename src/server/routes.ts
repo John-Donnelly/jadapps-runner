@@ -22,6 +22,11 @@ import {
   violationToHttpBody,
 } from "../runtime/tier-limits.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
+import {
+  WORKFLOW_RUN_LIMIT,
+  WORKFLOW_RUN_WINDOW_MS,
+  type RateLimiter,
+} from "../runtime/rate-limit.js";
 
 const StepSchema = z.object({
   runId: z.string().min(1),
@@ -89,6 +94,7 @@ interface Deps {
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
   concurrency: ConcurrencyLimiter;
+  rateLimiter: RateLimiter;
   log: Logger;
   pairingToken: string;
 }
@@ -535,6 +541,35 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
       reply.code(404).send({ error: "workflow not found" });
       return;
     }
+
+    // Phase 5i rate limit. Keyed on the access-token sub so a single AI
+    // agent looping workflow_run can't stampede the orchestrator. Tier
+    // overrides will land here as we wire per-tier streaming claims.
+    let access;
+    try {
+      access = await deps.tokens.getAccessToken();
+    } catch (err) {
+      reply.code(401).send({ error: `runner unpaired: ${(err as Error).message}` });
+      return;
+    }
+    const rl = deps.rateLimiter.check(
+      `workflow_run:${access.sub}`,
+      WORKFLOW_RUN_LIMIT,
+      WORKFLOW_RUN_WINDOW_MS,
+    );
+    if (!rl.ok) {
+      reply
+        .code(429)
+        .header("retry-after", Math.ceil(rl.retryAfterMs / 1000).toString())
+        .send({
+          error: "rate_limited",
+          message: `workflow_run is capped at ${WORKFLOW_RUN_LIMIT}/hour. Retry in ${Math.ceil(rl.retryAfterMs / 1000)}s.`,
+          limit: { type: "workflow_run", value: WORKFLOW_RUN_LIMIT, windowMs: WORKFLOW_RUN_WINDOW_MS },
+          retryAfterMs: rl.retryAfterMs,
+        });
+      return;
+    }
+
     try {
       const result = await deps.localWorkflowRunner.run(wf);
       if (!result.ok) {

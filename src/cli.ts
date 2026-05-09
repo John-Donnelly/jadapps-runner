@@ -223,6 +223,7 @@ program
       eventQueue: runner.eventQueue,
       concurrency: runner.concurrency,
       license: runner.license,
+      rateLimiter: runner.rateLimiter,
     };
 
     // Phase 11 license gate — fail closed on stdio so AI clients see a

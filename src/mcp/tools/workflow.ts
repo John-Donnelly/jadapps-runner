@@ -207,6 +207,51 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
         };
       }
 
+      // Phase 5i rate limit — keyed on the access-token sub so a single
+      // AI agent looping workflow_run hits 10/hr and gets clean backoff
+      // info instead of slowly draining the queue.
+      let access;
+      try {
+        access = await deps.tokens.getAccessToken();
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Runner unpaired: ${(err as Error).message}`,
+            },
+          ],
+        };
+      }
+      const { WORKFLOW_RUN_LIMIT, WORKFLOW_RUN_WINDOW_MS } = await import(
+        "../../runtime/rate-limit.js"
+      );
+      const rl = deps.rateLimiter.check(
+        `workflow_run:${access.sub}`,
+        WORKFLOW_RUN_LIMIT,
+        WORKFLOW_RUN_WINDOW_MS,
+      );
+      if (!rl.ok) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "rate_limited",
+                  message: `workflow_run capped at ${WORKFLOW_RUN_LIMIT}/hour. Retry in ${Math.ceil(rl.retryAfterMs / 1000)}s.`,
+                  retryAfterMs: rl.retryAfterMs,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
       // If the client supplied a progressToken on the request, emit
       // notifications/progress per finished step. Without a token MCP
       // requires the server to skip progress notifications.

@@ -11,6 +11,7 @@ import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { ApiClient } from "../api/client.js";
 import type { EventQueue } from "../telemetry/queue.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
+import type { RateLimiter } from "../runtime/rate-limit.js";
 import type { LicenseManager } from "../auth/license.js";
 import { registerToolTools } from "./tools/tool.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
@@ -36,6 +37,7 @@ export interface McpDeps {
   eventQueue: EventQueue;
   concurrency: ConcurrencyLimiter;
   license: LicenseManager;
+  rateLimiter: RateLimiter;
 }
 
 export const SERVER_INFO = {

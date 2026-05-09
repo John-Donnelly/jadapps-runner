@@ -52,7 +52,15 @@ export class LicenseManager {
     private readonly api: ApiClient,
     private readonly tokens: TokenManager,
     private readonly log: Logger,
-  ) {}
+  ) {
+    // When the user re-pairs (TokenManager fires onRefresh on sub change),
+    // drop the cached license + any permanent denial so the next call
+    // re-issues against the new identity. Routine 15-minute access-token
+    // refreshes don't trigger this — only identity changes.
+    this.tokens.onRefresh(() => {
+      this.invalidate();
+    });
+  }
 
   /**
    * Returns a valid license token, refreshing if needed. Returns null when
