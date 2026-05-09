@@ -31,6 +31,17 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
     module: "smtp",
     npmDeps: ["nodemailer"],
   },
+  // Markdown family (batch 1 of 3) — pure-Node string transforms.
+  "md-emoji-remover": { module: "md-emoji-remover", npmDeps: [] },
+  "md-bold-italic-cleaner": { module: "md-bold-italic-cleaner", npmDeps: [] },
+  "md-frontmatter-builder": { module: "md-frontmatter-builder", npmDeps: [] },
+  "md-toc-generator": { module: "md-toc-generator", npmDeps: [] },
+  "md-heading-shifter": { module: "md-heading-shifter", npmDeps: [] },
+  "md-image-path-rewriter": { module: "md-image-path-rewriter", npmDeps: [] },
+  "md-merger": { module: "md-merger", npmDeps: [] },
+  "md-minifier": { module: "md-minifier", npmDeps: [] },
+  "md-secret-redactor": { module: "md-secret-redactor", npmDeps: [] },
+  "md-list-fixer": { module: "md-list-fixer", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
