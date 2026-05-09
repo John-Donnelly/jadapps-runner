@@ -173,6 +173,11 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-repair": { module: "pdf-repair", npmDeps: [] },
   "pdf-linearize": { module: "pdf-linearize", npmDeps: [] },
   "pdf-compress-lossless": { module: "pdf-compress-lossless", npmDeps: [] },
+  // Playwright pack — HTML/Markdown to PDF via headless Chromium (peer dep).
+  "html-to-pdf": { module: "html-to-pdf", npmDeps: ["playwright"] },
+  "markdown-to-pdf": { module: "markdown-to-pdf", npmDeps: ["marked", "playwright"] },
+  "md-to-pdf-academic": { module: "md-to-pdf-academic", npmDeps: ["marked", "playwright"] },
+  "md-to-pdf-modern": { module: "md-to-pdf-modern", npmDeps: ["marked", "playwright"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
