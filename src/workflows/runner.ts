@@ -14,19 +14,44 @@ import type {
 import type { LocalWorkflow } from "./store.js";
 
 /**
- * Local linear workflow runner. v0.1 supports flat workflows where each
- * step's primary output feeds directly into the next step (no branching).
- * Logic nodes (logic.if-else, logic.for-each, logic.switch, etc.) are
- * surfaced as errors — the website's browser-side runner is the canonical
- * branching executor for now.
+ * Local linear workflow runner. Walks the graph topologically and pipes
+ * each step's primary output into the next step's inputs.
+ *
+ * Logic node handling (v0.2):
+ *   - `logic.delay`: sleeps the configured ms then passes the upstream
+ *     value through unchanged
+ *   - `logic.merge`, `logic.set`, `logic.filter`, `logic.parallel`,
+ *     `logic.try-catch`: passthrough — the upstream value flows to the
+ *     next step. Outputs that need real graph-port semantics (if-else's
+ *     true/false routing, switch's case_N routing, for-each iteration)
+ *     don't behave correctly here. Run those workflows from the website
+ *     orchestrator where the full port-aware runner lives.
+ *   - `logic.if-else`, `logic.switch`, `logic.for-each`, `logic.while`,
+ *     `logic.sub-workflow`, `logic.code`: surface a clear error so the
+ *     caller knows to delegate to the website runner.
  *
  * What this gives us:
- *   - MCP can trigger workflow runs locally without round-tripping the
- *     website
+ *   - MCP can trigger workflow runs locally for the common case
  *   - Cron-driven runs in the runner pick up local workflow definitions
  *     immediately (no claim flow)
- *   - Fully offline-capable for the linear-only subset
+ *   - Fully offline-capable for the supported subset
  */
+
+const PASSTHROUGH_LOGIC_SLUGS = new Set([
+  "logic.merge",
+  "logic.set",
+  "logic.filter",
+  "logic.parallel",
+  "logic.try-catch",
+]);
+const UNSUPPORTED_LOGIC_SLUGS = new Set([
+  "logic.if-else",
+  "logic.switch",
+  "logic.for-each",
+  "logic.while",
+  "logic.sub-workflow",
+  "logic.code",
+]);
 
 interface Node {
   id: string;
@@ -66,6 +91,19 @@ export class LocalWorkflowRunner {
   async run(
     workflow: LocalWorkflow,
     initialFiles: FileRef[] = [],
+    /**
+     * Optional progress callback invoked once per finished step. Used by the
+     * MCP `workflow_run` tool to emit `notifications/progress` to the
+     * client so AI agents can show per-step progress UI.
+     */
+    onStep?: (info: {
+      stepIndex: number;
+      totalSteps: number;
+      nodeId: string;
+      toolSlug: string;
+      status: "done" | "error" | "skipped";
+      durationMs: number;
+    }) => void,
   ): Promise<LocalRunResult> {
     const start = Date.now();
     const runId = randomUUID();
@@ -96,17 +134,62 @@ export class LocalWorkflowRunner {
     // flow into the next step's inputs without copying.
     this.scratch.acquire(runId);
 
+    const totalSteps = ordered.length;
+    /**
+     * Push a step result + fire the optional progress callback. Use this
+     * everywhere instead of `steps.push` so we never report a step the
+     * caller can't see.
+     */
+    const pushStep = (
+      stepIndex: number,
+      entry: LocalRunResult["steps"][number],
+    ) => {
+      steps.push(entry);
+      onStep?.({
+        stepIndex,
+        totalSteps,
+        nodeId: entry.nodeId,
+        toolSlug: entry.toolSlug,
+        status: entry.status,
+        durationMs: entry.durationMs,
+      });
+    };
+
     try {
       for (const [stepIndex, node] of ordered.entries()) {
-        if (node.toolSlug.startsWith("logic.")) {
-          steps.push({
+        // Inline-handle the logic-node cases the local runner can fake
+        // sensibly (passthrough + delay). Branching cases that need real
+        // port routing surface as errors so the caller delegates upstream.
+        if (node.toolSlug === "logic.delay") {
+          const ms = Math.min(Number(node.config["ms"] ?? 1000), 10_000);
+          await new Promise((r) => setTimeout(r, ms));
+          pushStep(stepIndex, {
+            nodeId: node.id,
+            toolSlug: node.toolSlug,
+            status: "done",
+            durationMs: ms,
+            bytesProcessed: 0,
+          });
+          continue; // keep currentFiles unchanged
+        }
+        if (PASSTHROUGH_LOGIC_SLUGS.has(node.toolSlug)) {
+          pushStep(stepIndex, {
+            nodeId: node.id,
+            toolSlug: node.toolSlug,
+            status: "done",
+            durationMs: 0,
+            bytesProcessed: 0,
+          });
+          continue;
+        }
+        if (UNSUPPORTED_LOGIC_SLUGS.has(node.toolSlug)) {
+          pushStep(stepIndex, {
             nodeId: node.id,
             toolSlug: node.toolSlug,
             status: "error",
             durationMs: 0,
             bytesProcessed: 0,
-            error:
-              "Local linear runner doesn't support logic nodes yet — run this workflow from the website orchestrator instead.",
+            error: `Local runner doesn't execute ${node.toolSlug} — port routing requires the website orchestrator. Use workflow_run_enqueue instead.`,
           });
           return {
             runId,
@@ -119,7 +202,7 @@ export class LocalWorkflowRunner {
 
         const entry = await this.catalogue.lookup(node.toolSlug);
         if (!entry) {
-          steps.push({
+          pushStep(stepIndex, {
             nodeId: node.id,
             toolSlug: node.toolSlug,
             status: "error",
@@ -174,7 +257,7 @@ export class LocalWorkflowRunner {
         try {
           result = await this.executor.execute({ runToken, step });
         } catch (err) {
-          steps.push({
+          pushStep(stepIndex, {
             nodeId: node.id,
             toolSlug: node.toolSlug,
             status: "error",
@@ -191,7 +274,7 @@ export class LocalWorkflowRunner {
           };
         }
 
-        steps.push({
+        pushStep(stepIndex, {
           nodeId: node.id,
           toolSlug: node.toolSlug,
           status: result.ok ? "done" : "error",

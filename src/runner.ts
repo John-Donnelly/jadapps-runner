@@ -40,6 +40,7 @@ export interface Runner {
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
   api: ApiClient;
+  eventQueue: EventQueue;
 }
 
 /** Wire the dependency graph and start the local HTTP server. */
@@ -99,6 +100,7 @@ export async function startRunner(): Promise<Runner> {
     workflowStore,
     workflowSync,
     localWorkflowRunner,
+    eventQueue: queue,
   });
 
   // Best-effort sync on startup. Failures are logged inside WorkflowSync —
@@ -154,6 +156,7 @@ export async function startRunner(): Promise<Runner> {
     workflowSync,
     localWorkflowRunner,
     api,
+    eventQueue: queue,
   };
 }
 

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpDeps } from "../server.js";
 import type { Credential } from "../../types.js";
+import { getProbe, listProbeSlugs } from "../connector-probes.js";
 
 /**
  * MCP tools for credential vault management. Important:
@@ -88,6 +89,78 @@ export function registerCredentialTools(server: McpServer, deps: McpDeps): void 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok }) }],
       };
+    },
+  );
+
+  server.registerTool(
+    "credential_test",
+    {
+      title: "Probe a credential against a connector",
+      description:
+        "Verify a stored credential by making a lightweight read against " +
+        "the connector (e.g. Slack auth.test, Stripe /v1/account, GitHub " +
+        "/user, Notion /users/me). Returns ok + status + detail. The secret " +
+        "value never leaves the runner — only the upstream API touches it.",
+      inputSchema: {
+        ref: z.string().describe("Credential ref name from credential_list"),
+        connectorSlug: z
+          .string()
+          .describe("Connector slug to probe with (e.g. 'slack-postmessage', 'stripe', 'airtable')"),
+      },
+    },
+    async ({ ref, connectorSlug }) => {
+      const credential = deps.credentials.get(ref);
+      if (!credential) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: `Credential not found: ${ref}` }],
+        };
+      }
+      const probe = getProbe(connectorSlug);
+      if (!probe) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "no_probe",
+                  message: `No probe registered for connector "${connectorSlug}".`,
+                  supportedSlugs: listProbeSlugs(),
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+      try {
+        const result = await probe(credential);
+        return {
+          isError: !result.ok,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  ref,
+                  connectorSlug,
+                  ...result,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error).message }],
+        };
+      }
     },
   );
 }

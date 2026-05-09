@@ -42,6 +42,7 @@ interface BootOptions {
   workflowStore: WorkflowStore;
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
+  eventQueue: import("../telemetry/queue.js").EventQueue;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -106,6 +107,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     workflowSync: opts.workflowSync,
     localWorkflowRunner: opts.localWorkflowRunner,
     api: opts.api,
+    eventQueue: opts.eventQueue,
   });
 
   await app.listen({ host: opts.cfg.host, port: opts.cfg.port });

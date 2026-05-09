@@ -220,6 +220,7 @@ program
       workflowSync: runner.workflowSync,
       localWorkflowRunner: runner.localWorkflowRunner,
       api: runner.api,
+      eventQueue: runner.eventQueue,
     });
 
     const transport = new StdioServerTransport();

@@ -9,6 +9,7 @@ import type { WorkflowStore } from "../workflows/store.js";
 import type { WorkflowSync } from "../workflows/sync.js";
 import type { LocalWorkflowRunner } from "../workflows/runner.js";
 import type { ApiClient } from "../api/client.js";
+import type { EventQueue } from "../telemetry/queue.js";
 import { registerToolTools } from "./tools/tool.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerLifecycleTools } from "./tools/lifecycle.js";
@@ -30,6 +31,7 @@ export interface McpDeps {
   workflowSync: WorkflowSync;
   localWorkflowRunner: LocalWorkflowRunner;
   api: ApiClient;
+  eventQueue: EventQueue;
 }
 
 export const SERVER_INFO = {

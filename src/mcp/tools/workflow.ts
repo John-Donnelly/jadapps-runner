@@ -193,10 +193,12 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
       description:
         "Execute a workflow stored locally. Uses the linear runner — for " +
         "branching/logic workflows, use the website orchestrator. Returns the " +
-        "run summary + per-step trace.",
+        "run summary + per-step trace. When the caller supplies a " +
+        "progressToken in the tool call's _meta, per-step progress " +
+        "notifications are emitted as the run proceeds.",
       inputSchema: { id: z.string() },
     },
-    async ({ id }) => {
+    async ({ id }, extra) => {
       const wf = deps.workflowStore.get(id);
       if (!wf) {
         return {
@@ -204,7 +206,35 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
           content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
         };
       }
-      const result = await deps.localWorkflowRunner.run(wf);
+
+      // If the client supplied a progressToken on the request, emit
+      // notifications/progress per finished step. Without a token MCP
+      // requires the server to skip progress notifications.
+      const progressToken = extra?._meta?.progressToken;
+      const onStepCallback = progressToken
+        ? (info: {
+            stepIndex: number;
+            totalSteps: number;
+            nodeId: string;
+            toolSlug: string;
+            status: "done" | "error" | "skipped";
+            durationMs: number;
+          }) => {
+            void extra
+              .sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken,
+                  progress: info.stepIndex + 1,
+                  total: info.totalSteps,
+                  message: `${info.toolSlug} → ${info.status} (${info.durationMs}ms)`,
+                },
+              })
+              .catch(() => undefined);
+          }
+        : undefined;
+
+      const result = await deps.localWorkflowRunner.run(wf, [], onStepCallback);
       return {
         isError: !result.ok,
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
