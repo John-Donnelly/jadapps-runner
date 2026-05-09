@@ -136,6 +136,11 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "xml-to-json": { module: "xml-to-json", npmDeps: [] },
   "yaml-to-json": { module: "yaml-to-json", npmDeps: [] },
   "html-to-md": { module: "html-to-md", npmDeps: [] },
+  // PDF family (batch 3 of 3) — text extraction via pdfjs-dist (no canvas).
+  "pdf-to-text": { module: "pdf-to-text", npmDeps: ["pdfjs-dist"] },
+  "pdf-to-markdown": { module: "pdf-to-markdown", npmDeps: ["pdfjs-dist"] },
+  "pdf-to-html": { module: "pdf-to-html", npmDeps: ["pdfjs-dist"] },
+  "pdf-to-chunks": { module: "pdf-to-chunks", npmDeps: ["pdfjs-dist"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
