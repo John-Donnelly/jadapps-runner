@@ -38,6 +38,24 @@ export interface RemoteWorkflowRow {
   updated_at: string;
 }
 
+/**
+ * Shape of a workflow_templates row as returned by the website's
+ * /api/orchestrator/templates endpoint.
+ */
+export interface TemplateRow {
+  id: string;
+  workflow_id: string | null;
+  slug: string;
+  name: string;
+  category: string | null;
+  description: string | null;
+  pseo_h1: string | null;
+  pseo_meta_description: string | null;
+  run_count: number;
+  is_featured: boolean;
+  published_at: string;
+}
+
 interface BeginPairInput {
   pendingId: string;
   publicKey: string;
@@ -280,6 +298,85 @@ export class ApiClient {
       ...(payload ? { payload } : {}),
     });
     return (await res.body.json()) as { queueId: string; status: string };
+  }
+
+  /**
+   * Workflow template CRUD. List + preview are unauthenticated; create /
+   * update / delete require the caller's Bearer access JWT (and ownership
+   * of the source workflow).
+   */
+  async listTemplates(
+    accessJwt: string | null,
+    query?: { q?: string; category?: string; featured?: boolean; limit?: number },
+  ): Promise<TemplateRow[]> {
+    const params = new URLSearchParams();
+    if (query?.q) params.set("q", query.q);
+    if (query?.category) params.set("category", query.category);
+    if (query?.featured) params.set("featured", "true");
+    if (query?.limit) params.set("limit", String(query.limit));
+    const url = `${this.apiBase}/api/orchestrator/templates${params.size > 0 ? `?${params}` : ""}`;
+    const headers: Record<string, string> = {};
+    if (accessJwt) headers.authorization = `Bearer ${accessJwt}`;
+    const res = await request(url, { method: "GET", headers });
+    if (res.statusCode >= 300) {
+      throw new ApiError(res.statusCode, await res.body.text());
+    }
+    const json = (await res.body.json()) as { templates: TemplateRow[] };
+    return json.templates ?? [];
+  }
+
+  async getTemplate(
+    accessJwt: string | null,
+    idOrSlug: string,
+  ): Promise<{ template: TemplateRow; graph: unknown }> {
+    const url = `${this.apiBase}/api/orchestrator/templates/${encodeURIComponent(idOrSlug)}`;
+    const headers: Record<string, string> = {};
+    if (accessJwt) headers.authorization = `Bearer ${accessJwt}`;
+    const res = await request(url, { method: "GET", headers });
+    if (res.statusCode >= 300) {
+      throw new ApiError(res.statusCode, await res.body.text());
+    }
+    return (await res.body.json()) as { template: TemplateRow; graph: unknown };
+  }
+
+  async createTemplate(
+    accessJwt: string,
+    body: {
+      workflowId: string;
+      slug: string;
+      name: string;
+      category?: string;
+      description?: string;
+      pseoH1?: string;
+      pseoMetaDescription?: string;
+      isFeatured?: boolean;
+    },
+  ): Promise<{ id: string; slug: string }> {
+    const url = `${this.apiBase}/api/orchestrator/templates`;
+    const res = await this.bearerJson(url, "POST", accessJwt, body);
+    const json = (await res.body.json()) as { template?: { id: string; slug: string } };
+    if (!json.template) throw new Error("createTemplate returned no template");
+    return json.template;
+  }
+
+  async updateTemplate(
+    accessJwt: string,
+    idOrSlug: string,
+    patch: Record<string, unknown>,
+  ): Promise<void> {
+    const url = `${this.apiBase}/api/orchestrator/templates/${encodeURIComponent(idOrSlug)}`;
+    await this.bearerJson(url, "PATCH", accessJwt, patch);
+  }
+
+  async deleteTemplate(accessJwt: string, idOrSlug: string): Promise<void> {
+    const url = `${this.apiBase}/api/orchestrator/templates/${encodeURIComponent(idOrSlug)}`;
+    const res = await request(url, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessJwt}` },
+    });
+    if (res.statusCode >= 300) {
+      throw new ApiError(res.statusCode, await res.body.text());
+    }
   }
 
   private async bearerGet(url: string, accessJwt: string) {

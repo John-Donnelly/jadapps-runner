@@ -12,6 +12,7 @@ import type { ApiClient } from "../api/client.js";
 import { registerToolTools } from "./tools/tool.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerLifecycleTools } from "./tools/lifecycle.js";
+import { registerTemplateTools } from "./tools/template.js";
 import { registerCredentialTools } from "./tools/credential.js";
 import { registerRunnerTools } from "./tools/runner.js";
 import { registerResources } from "./resources.js";
@@ -62,6 +63,7 @@ export function createMcpServer(deps: McpDeps): McpServer {
   registerToolTools(server, deps);
   registerWorkflowTools(server, deps);
   registerLifecycleTools(server, deps);
+  registerTemplateTools(server, deps);
   registerCredentialTools(server, deps);
   registerRunnerTools(server, deps);
   registerResources(server, deps);
