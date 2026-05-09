@@ -379,6 +379,53 @@ export class ApiClient {
     }
   }
 
+  /**
+   * Webhook management. POST to /workflows/:id/webhooks creates a new
+   * trigger and returns the secret + full URL ONCE — the caller must save
+   * it.
+   */
+  async listWebhooks(accessJwt: string, workflowId: string): Promise<unknown[]> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(workflowId)}/webhooks`;
+    const res = await this.bearerGet(url, accessJwt);
+    const json = (await res.body.json()) as { webhooks: unknown[] };
+    return json.webhooks ?? [];
+  }
+
+  async createWebhook(
+    accessJwt: string,
+    workflowId: string,
+    description?: string,
+  ): Promise<{ id: string; slug: string; secret: string; url: string }> {
+    const url = `${this.apiBase}/api/orchestrator/workflows/${encodeURIComponent(workflowId)}/webhooks`;
+    const res = await this.bearerJson(
+      url,
+      "POST",
+      accessJwt,
+      description ? { description } : {},
+    );
+    return (await res.body.json()) as {
+      id: string;
+      slug: string;
+      secret: string;
+      url: string;
+    };
+  }
+
+  /**
+   * Set or clear the cron schedule on a workflow. Reuses the existing
+   * /workflows/:id PATCH endpoint with just schedule_cron in the body.
+   * Pass null to clear the schedule.
+   */
+  async setCron(
+    accessJwt: string,
+    workflowId: string,
+    cron: string | null,
+  ): Promise<void> {
+    await this.patchServerWorkflow(accessJwt, workflowId, {
+      schedule_cron: cron,
+    });
+  }
+
   private async bearerGet(url: string, accessJwt: string) {
     const res = await request(url, {
       method: "GET",
