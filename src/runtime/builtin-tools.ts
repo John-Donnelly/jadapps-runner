@@ -125,6 +125,17 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-compose": { module: "pdf-compose", npmDeps: ["pdf-lib"] },
   "pdf-redact": { module: "pdf-redact", npmDeps: ["pdf-lib"] },
   "pdf-pii-redactor": { module: "pdf-pii-redactor", npmDeps: ["pdf-lib"] },
+  // Other family — pure-Node text/binary utilities.
+  "email-phone-scrubber": { module: "email-phone-scrubber", npmDeps: [] },
+  "entropy-analyzer": { module: "entropy-analyzer", npmDeps: [] },
+  "file-integrity-monitor": { module: "file-integrity-monitor", npmDeps: [] },
+  "hex-header-inspector": { module: "hex-header-inspector", npmDeps: [] },
+  "magic-byte-validator": { module: "magic-byte-validator", npmDeps: [] },
+  "password-entropy-auditor": { module: "password-entropy-auditor", npmDeps: [] },
+  "pii-scan": { module: "pii-scan", npmDeps: [] },
+  "xml-to-json": { module: "xml-to-json", npmDeps: [] },
+  "yaml-to-json": { module: "yaml-to-json", npmDeps: [] },
+  "html-to-md": { module: "html-to-md", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
