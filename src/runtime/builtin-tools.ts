@@ -165,6 +165,14 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "pdf-to-jpg": { module: "pdf-to-jpg", npmDeps: ["pdfjs-dist", "@napi-rs/canvas"] },
   "pdf-to-image-strip": { module: "pdf-to-image-strip", npmDeps: ["pdfjs-dist", "@napi-rs/canvas"] },
   "pdf-grayscale": { module: "pdf-grayscale", npmDeps: ["pdfjs-dist", "@napi-rs/canvas", "pdf-lib"] },
+  // qpdf pack — shells out to the qpdf binary for security/repair/compression.
+  "pdf-password-protect": { module: "pdf-password-protect", npmDeps: [] },
+  "pdf-remove-password": { module: "pdf-remove-password", npmDeps: [] },
+  "pdf-unlock": { module: "pdf-unlock", npmDeps: [] },
+  "pdf-permission-setter": { module: "pdf-permission-setter", npmDeps: [] },
+  "pdf-repair": { module: "pdf-repair", npmDeps: [] },
+  "pdf-linearize": { module: "pdf-linearize", npmDeps: [] },
+  "pdf-compress-lossless": { module: "pdf-compress-lossless", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
