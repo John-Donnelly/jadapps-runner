@@ -184,6 +184,12 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   // PDF specialty.
   "pdf-compress-lossy": { module: "pdf-compress-lossy", npmDeps: ["pdfjs-dist", "@napi-rs/canvas", "pdf-lib", "sharp"] },
   "pdf-font-subsetter": { module: "pdf-font-subsetter", npmDeps: ["pdf-lib", "pdfjs-dist", "@pdf-lib/fontkit"] },
+  // Specialty: OCR, DICOM, signing, PDF/A.
+  "pdf-ocr": { module: "pdf-ocr", npmDeps: ["pdfjs-dist", "@napi-rs/canvas", "tesseract.js"] },
+  "dicom-to-pdf": { module: "dicom-to-pdf", npmDeps: ["dcmjs", "pdf-lib", "sharp"] },
+  "pdf-sign": { module: "pdf-sign", npmDeps: ["pdf-lib", "@signpdf/signpdf", "@signpdf/signer-p12", "@signpdf/placeholder-pdf-lib"] },
+  "pdf-digital-signature": { module: "pdf-digital-signature", npmDeps: ["pdf-lib", "@signpdf/signpdf", "@signpdf/signer-p12", "@signpdf/placeholder-pdf-lib"] },
+  "pdf-to-pdfa": { module: "pdf-to-pdfa", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
