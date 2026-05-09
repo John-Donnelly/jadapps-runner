@@ -80,6 +80,22 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "aes-256-encryptor": { module: "aes-256-encryptor", npmDeps: [] },
   // Audio family — pure-Node binary munging.
   "audio-id3-ghoster": { module: "audio-id3-ghoster", npmDeps: [] },
+  // PDF family (batch 1 of 3) — pdf-lib for non-rendering page operations.
+  "pdf-merge": { module: "pdf-merge", npmDeps: ["pdf-lib"] },
+  "pdf-split": { module: "pdf-split", npmDeps: ["pdf-lib"] },
+  "pdf-split-fixed": { module: "pdf-split-fixed", npmDeps: ["pdf-lib"] },
+  "pdf-split-range": { module: "pdf-split-range", npmDeps: ["pdf-lib"] },
+  "pdf-extract-pages": { module: "pdf-extract-pages", npmDeps: ["pdf-lib"] },
+  "pdf-delete-pages": { module: "pdf-delete-pages", npmDeps: ["pdf-lib"] },
+  "pdf-reorder": { module: "pdf-reorder", npmDeps: ["pdf-lib"] },
+  "pdf-rotate": { module: "pdf-rotate", npmDeps: ["pdf-lib"] },
+  "pdf-watermark": { module: "pdf-watermark", npmDeps: ["pdf-lib"] },
+  "pdf-page-numbers": { module: "pdf-page-numbers", npmDeps: ["pdf-lib"] },
+  "pdf-bates-numbering": { module: "pdf-bates-numbering", npmDeps: ["pdf-lib"] },
+  "pdf-metadata-scrubber": { module: "pdf-metadata-scrubber", npmDeps: ["pdf-lib"] },
+  "pdf-annotation-remover": { module: "pdf-annotation-remover", npmDeps: ["pdf-lib"] },
+  "pdf-flatten": { module: "pdf-flatten", npmDeps: ["pdf-lib"] },
+  "pdf-stamp": { module: "pdf-stamp", npmDeps: ["pdf-lib"] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
