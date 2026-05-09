@@ -74,6 +74,12 @@ export const BUILTIN_TOOLS: Record<string, { module: string; npmDeps: string[] }
   "excel-formula-to-value": { module: "excel-formula-to-value", npmDeps: ["exceljs"] },
   "excel-date-standardizer": { module: "excel-date-standardizer", npmDeps: ["exceljs"] },
   "excel-regex-extractor": { module: "excel-regex-extractor", npmDeps: ["exceljs"] },
+  // Security family — node:crypto built-ins, no extra deps.
+  "hash-files": { module: "hash-files", npmDeps: [] },
+  "multi-hash-fingerprinter": { module: "multi-hash-fingerprinter", npmDeps: [] },
+  "aes-256-encryptor": { module: "aes-256-encryptor", npmDeps: [] },
+  // Audio family — pure-Node binary munging.
+  "audio-id3-ghoster": { module: "audio-id3-ghoster", npmDeps: [] },
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
