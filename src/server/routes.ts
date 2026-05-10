@@ -176,20 +176,22 @@ function outputsDirFor(runId: string): string {
 
 export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<void> {
   app.addHook("onRequest", async (req, reply) => {
-    if (req.url.startsWith("/health")) return;
+    if (req.url.startsWith("/health") || req.url.startsWith("/v1/health")) return;
     const auth = req.headers.authorization ?? "";
     if (auth !== `Bearer ${deps.pairingToken}`) {
       reply.code(401).send({ error: "invalid pairing token" });
     }
   });
 
-  app.get("/health", async () => ({
+  const healthHandler = async () => ({
     ok: true,
     name: "jadapps-runner",
     version: "0.1.0",
     pid: process.pid,
     queueDepth: 0,
-  }));
+  });
+  app.get("/health", healthHandler);
+  app.get("/v1/health", healthHandler);
 
   app.get("/v1/disk", async (_req, reply) => {
     try {
