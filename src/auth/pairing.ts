@@ -39,14 +39,11 @@ export class PairingService {
     const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
     const pendingId = randomUUID();
 
-    // Stash the in-flight pubkey + privkey so confirmPairing can complete.
-    writeFileSync(
-      paths(this.cfg).pairing + ".pending",
-      JSON.stringify({ pendingId, publicKey, privateKey, code, deviceName }),
-      "utf8",
-    );
-
-    const { deepLink } = await this.api.beginPair({
+    // Begin first so we can persist the server's pollSecret alongside the
+    // private key. The server stores only the secret's hash and silently
+    // returns "not ready" on /pair/poll if the runner doesn't echo the
+    // matching plaintext back — without it, the loop never resolves.
+    const begin = await this.api.beginPair({
       pendingId,
       publicKey,
       code,
@@ -54,7 +51,20 @@ export class PairingService {
       apiBase: this.cfg.apiBase,
     });
 
-    return { code, deepLink, pendingId };
+    writeFileSync(
+      paths(this.cfg).pairing + ".pending",
+      JSON.stringify({
+        pendingId,
+        publicKey,
+        privateKey,
+        code,
+        deviceName,
+        pollSecret: begin.pollSecret,
+      }),
+      "utf8",
+    );
+
+    return { code, deepLink: begin.deepLink, pendingId };
   }
 
   /**
@@ -72,11 +82,12 @@ export class PairingService {
       privateKey: string;
       code: string;
       deviceName: string;
+      pollSecret?: string;
     };
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const result = await this.api.pollPair(pending.pendingId);
+      const result = await this.api.pollPair(pending.pendingId, pending.pollSecret);
       if (result.confirmed) {
         const identity: DeviceIdentity = {
           deviceId: result.deviceId,

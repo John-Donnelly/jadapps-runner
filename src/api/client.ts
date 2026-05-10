@@ -84,19 +84,23 @@ export class ApiClient {
     private readonly log: Logger,
   ) {}
 
-  async beginPair(input: BeginPairInput): Promise<{ deepLink: string }> {
+  async beginPair(
+    input: BeginPairInput,
+  ): Promise<{ deepLink: string; pollSecret?: string }> {
     const res = await this.post("/api/runner/pair/begin", {
       pendingId: input.pendingId,
       publicKey: input.publicKey,
       code: input.code,
       deviceName: input.deviceName,
     });
-    return res as { deepLink: string };
+    return res as { deepLink: string; pollSecret?: string };
   }
 
-  async pollPair(pendingId: string): Promise<PollPairResult> {
+  async pollPair(pendingId: string, pollSecret?: string): Promise<PollPairResult> {
     try {
-      const res = await this.post("/api/runner/pair/poll", { pendingId });
+      const body: { pendingId: string; pollSecret?: string } = { pendingId };
+      if (pollSecret) body.pollSecret = pollSecret;
+      const res = await this.post("/api/runner/pair/poll", body);
       return res as PollPairResult;
     } catch (err) {
       this.log.debug({ err }, "pair poll failed; will retry");
