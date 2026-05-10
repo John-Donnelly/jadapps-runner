@@ -339,6 +339,7 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
           "runner-local",
           "runner-native",
           "runner-builtin",
+          "browser-native",
           "runner-via-server",
         ],
         tools: [
@@ -426,7 +427,7 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
           durationMs: result.durationMs,
           metrics: extractMetrics(result.outputs),
           inlineText,
-          mode: entry.runtime === "runner-native" ? "headless-browser" : "engine",
+          mode: entry.runtime === "browser-native" ? "headless-browser" : "engine",
           outputs: result.outputs,
         };
       } finally {
