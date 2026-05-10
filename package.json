@@ -22,7 +22,8 @@
     "lint": "eslint src --ext .ts",
     "tauri": "tauri",
     "tauri:dev": "npm run build && tauri dev",
-    "tauri:build": "npm run build && tauri build"
+    "tauri:build": "npm run build && tauri build",
+    "tauri:stage": "node scripts/stage-tauri-bundle.mjs"
   },
   "engines": {
     "node": ">=20.10.0"
