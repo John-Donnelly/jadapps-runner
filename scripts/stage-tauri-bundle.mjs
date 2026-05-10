@@ -57,4 +57,20 @@ execSync("npm ci --omit=dev --no-audit --no-fund", {
   stdio: "inherit",
 });
 
+// Copy the Node that just ran `npm ci` into src-tauri/binaries/ so Tauri's
+// externalBin ships an ABI-matched pair: the prebuilt .node files in
+// node_modules were compiled for THIS Node's NODE_MODULE_VERSION. Without
+// this, dev's PATH-Node and a stale binaries/node-*.exe drift apart and
+// the runner crashes with "compiled against a different Node.js version".
+// Triple is hard-coded for win-x64; cross-platform staging would compute it.
+const bundledNodeDest = join(
+  root,
+  "src-tauri",
+  "binaries",
+  "node-x86_64-pc-windows-msvc.exe",
+);
+console.log(`  copying ${process.execPath} → ${bundledNodeDest}`);
+mkdirSync(dirname(bundledNodeDest), { recursive: true });
+copyFileSync(process.execPath, bundledNodeDest);
+
 console.log("Done.");
