@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { StepResult, FileRef } from "../types.js";
+import { probeHardware } from "../runtime/hardware.js";
+import { selectVideoEncoder } from "../runtime/ffmpeg-encoder.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,9 +39,25 @@ export default async function h265Encoder(ctx: ToolContext): Promise<StepResult>
   const outRef = `${baseName}-h265.mp4`;
   const outPath = join(ctx.scratchDir, outRef);
 
-  const args = ["-y", "-i", inPath, "-c:v", "libx265", "-preset", preset];
-  if (bitrate != null) args.push("-b:v", `${bitrate}k`);
-  else args.push("-crf", String(crf));
+  // Consult the host probe; pick hevc_nvenc / hevc_qsv / hevc_videotoolbox /
+  // hevc_amf / hevc_vaapi when available, otherwise fall back to libx265.
+  // preferSoftware lets the caller force libx265 — sometimes the slower
+  // software path produces noticeably better output for quality-critical work.
+  const preferSoftware = cfg.preferSoftware === true;
+  const choice = selectVideoEncoder(await probeHardware(), "hevc", { preferSoftware });
+
+  const args = ["-y", "-i", inPath, "-c:v", choice.encoder];
+  if (choice.hardware) {
+    // Hardware encoders use family-specific rate-control args; user's
+    // libx265 preset/crf knobs don't translate cleanly so we ignore them
+    // unless they pass an explicit bitrate (which works on every encoder).
+    args.push(...choice.extraArgs);
+    if (bitrate != null) args.push("-b:v", `${bitrate}k`);
+  } else {
+    args.push("-preset", preset);
+    if (bitrate != null) args.push("-b:v", `${bitrate}k`);
+    else args.push("-crf", String(crf));
+  }
   args.push("-c:a", "aac", "-b:a", "192k", "-tag:v", "hvc1", outPath);
 
   try {
@@ -53,7 +71,16 @@ export default async function h265Encoder(ctx: ToolContext): Promise<StepResult>
   const outBytes = sizeOrFallback(outPath, 0);
   return {
     ok: true,
-    outputs: { codec: "libx265", crf: bitrate == null ? crf : null, bitrate, preset, originalBytes: totalIn, encodedBytes: outBytes },
+    outputs: {
+      codec: choice.encoder,
+      encoderFamily: choice.family,
+      hardware: choice.hardware,
+      crf: choice.hardware || bitrate != null ? null : crf,
+      bitrate,
+      preset: choice.hardware ? null : preset,
+      originalBytes: totalIn,
+      encodedBytes: outBytes,
+    },
     fileRefs: [{ ref: outRef, bytes: outBytes, sha256: "", mime: "video/mp4", filename: outRef }],
     bytesProcessed: totalIn,
     durationMs: Date.now() - start,
