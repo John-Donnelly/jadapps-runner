@@ -199,7 +199,10 @@ program
       return true;
     }) as typeof process.stdout.write;
 
-    const runner = await startRunner();
+    // Headless: the long-running daemon (Tauri shell or `jadapps-runner start`)
+    // already owns :9789. We just need the dep graph wired so the MCP server
+    // can call into the executor over stdio.
+    const runner = await startRunner({ headless: true });
 
     // Restore stdout for the MCP transport.
     process.stdout.write = originalWrite;
