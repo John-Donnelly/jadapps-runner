@@ -395,13 +395,95 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
       title: "Run a saved workflow",
       description:
         "Execute a workflow stored locally. Uses the linear runner — for " +
-        "branching/logic workflows, use the website orchestrator. Returns the " +
-        "run summary + per-step trace. When the caller supplies a " +
-        "progressToken in the tool call's _meta, per-step progress " +
-        "notifications are emitted as the run proceeds.",
-      inputSchema: { id: z.string() },
+        "branching/logic workflows, use the website orchestrator.\n\n" +
+        "Feed the first step its input the same three ways tool_run accepts " +
+        "(pick by what you have):\n\n" +
+        "  1. inputContent — raw text content as a string. Use when the " +
+        "user pasted text into chat or the file body is already in your " +
+        "context. The runner writes it to scratch as the first step's input.\n\n" +
+        "  2. inputPaths — absolute paths (or relative paths with `cwd`). " +
+        "Use when the user names a file by path. Hard-linked into the per-" +
+        "run scratch dir.\n\n" +
+        "  3. (omit both) — for workflows whose first step doesn't need a " +
+        "file input (e.g. an HTTP-trigger fetch). Steps still run; the " +
+        "first step just sees an empty fileRefs array.\n\n" +
+        "Outputs: pass `outputDir` (absolute) to write the last step's " +
+        "output files to a real directory and get `outputPaths` back. " +
+        "Without it, outputs are released with the run's scratch dir.\n\n" +
+        "Progress: when the caller supplies a progressToken in the tool " +
+        "call's _meta, per-step `notifications/progress` events fire.\n\n" +
+        "Example — clean and convert a CSV the user named by path:\n" +
+        "{\n" +
+        '  "id": "<workflowId from workflow_list>",\n' +
+        '  "inputPaths": ["C:/Users/me/Documents/messy.csv"],\n' +
+        '  "outputDir": "C:/Users/me/Documents/jadapps-out"\n' +
+        "}",
+      inputSchema: {
+        id: z.string().describe("Workflow id from workflow_list"),
+        inputContent: z
+          .union([
+            z.string(),
+            z.array(
+              z.object({
+                filename: z.string(),
+                content: z.string(),
+                mimeType: z.string().optional(),
+              }),
+            ),
+          ])
+          .optional()
+          .describe("Inline text content fed to the first step. Bypasses base64."),
+        inputPaths: z
+          .array(
+            z.union([
+              z.string(),
+              z.object({
+                path: z.string(),
+                mimeType: z.string().optional(),
+                filename: z.string().optional(),
+              }),
+            ]),
+          )
+          .optional()
+          .describe("Local-disk paths fed to the first step. Hard-linked into scratch."),
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute working directory to resolve relative inputPaths against.",
+          ),
+        outputDir: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute directory to write the final-step outputs to. Created " +
+              "if missing. When set, the response carries outputPaths.",
+          ),
+        overwrite: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Allow clobbering existing files in outputDir."),
+      },
     },
-    async ({ id }, extra) => {
+    async ({ id, inputContent, inputPaths, cwd, outputDir, overwrite }, extra) => {
+      if (outputDir !== undefined && !outputDir.match(/^([a-zA-Z]:[\\/]|[\\/])/)) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `outputDir must be an absolute path; got ${outputDir}`,
+            },
+          ],
+        };
+      }
+      if (cwd !== undefined && !cwd.match(/^([a-zA-Z]:[\\/]|[\\/])/)) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: `cwd must be an absolute path; got ${cwd}` }],
+        };
+      }
       const wf = deps.workflowStore.get(id);
       if (!wf) {
         return {
@@ -482,7 +564,14 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
           }
         : undefined;
 
-      const result = await deps.localWorkflowRunner.run(wf, [], onStepCallback);
+      const runOpts: Parameters<typeof deps.localWorkflowRunner.run>[1] = {};
+      if (inputContent !== undefined) runOpts.inputContent = inputContent;
+      if (inputPaths !== undefined) runOpts.inputPaths = inputPaths;
+      if (cwd !== undefined) runOpts.cwd = cwd;
+      if (outputDir !== undefined) runOpts.outputDir = outputDir;
+      if (overwrite !== undefined) runOpts.overwrite = overwrite;
+      if (onStepCallback) runOpts.onStep = onStepCallback;
+      const result = await deps.localWorkflowRunner.run(wf, runOpts);
       return {
         isError: !result.ok,
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
