@@ -1,4 +1,5 @@
 import { parentPort, workerData } from "node:worker_threads";
+import { createRequire } from "node:module";
 import type { Credential, FileRef, StepResult } from "../types.js";
 
 interface WorkerInit {
@@ -27,7 +28,26 @@ interface ToolContext {
   credentials: Record<string, Credential>;
   scratchDir: string;
   emitProgress(bytes: number): void;
+  /**
+   * Loads a vetted runtime module from the runner's node_modules so heavy
+   * libraries don't have to be inlined into every encrypted bundle. The
+   * allowlist below keeps bundles from reaching into arbitrary internals.
+   */
+  requireRuntime(name: string): unknown;
 }
+
+/**
+ * Allowlist of npm packages bundles can pull from the runner's runtime.
+ * Adding an entry here exposes the real module to bundle code; it
+ * survives encryption, version drift, and the IP-protection envelope.
+ */
+const RUNTIME_MODULE_ALLOWLIST = new Set([
+  "js-yaml",
+  "fast-xml-parser",
+  "playwright",
+  "sharp",
+]);
+const runtimeRequire = createRequire(import.meta.url);
 
 const init = workerData as WorkerInit;
 const port = parentPort;
@@ -57,6 +77,15 @@ port.on("message", async (job: WorkerJob) => {
       credentials: job.credentials,
       scratchDir: job.scratchDir,
       emitProgress: (bytes) => port.postMessage({ type: "progress", jobId: job.jobId, bytes }),
+      requireRuntime: (name: string) => {
+        if (!RUNTIME_MODULE_ALLOWLIST.has(name)) {
+          throw new Error(
+            `requireRuntime('${name}'): module is not in the runner allowlist. ` +
+              `Add it to RUNTIME_MODULE_ALLOWLIST in src/runtime/worker.ts.`,
+          );
+        }
+        return runtimeRequire(name);
+      },
     };
     const result = await mod.default(ctx);
     port.postMessage({

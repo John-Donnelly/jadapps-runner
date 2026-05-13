@@ -722,26 +722,33 @@ async function writeOutputsToDir(
   await mkdir(target, { recursive: true });
 
   const paths: string[] = [];
+  const usedThisRun = new Set<string>();
   for (const ref of args.outputRefs) {
-    const dst = join(target, ref.filename);
+    const initialDst = join(target, ref.filename);
+    let dst = initialDst;
+
+    // When the would-be destination collides — either with a file already on
+    // disk OR with another output we just wrote in this same run — append
+    // `.out` before the extension and try again. Repeat (`foo.out.out.csv`,
+    // …) until a free name is found. Keeps the runner from silently
+    // overwriting an input file when the caller picks `outputDir == dir(input)`.
+    // `overwrite: true` opts out and clobbers the original target, matching
+    // the previous behaviour for callers who really mean it.
     if (!args.overwrite) {
-      // stat returning success means the file is already there; the call
-      // bails out instead of clobbering. Callers can pass overwrite: true.
-      const exists = await stat(dst).then(
-        () => true,
-        () => false,
-      );
-      if (exists) {
-        return {
-          error: `${dst} already exists. Pass overwrite: true to replace, or pick a different filename.`,
-        };
+      while (
+        usedThisRun.has(dst) ||
+        (await stat(dst).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        dst = appendOutSuffix(dst);
       }
     }
+    usedThisRun.add(dst);
+
     const src = args.scratch.resolve(args.runId, ref.ref);
     try {
-      // Hard link is instantaneous on the same volume and leaves both paths
-      // pointing at the same content. Cross-volume / Windows-quirk fallbacks
-      // mirror the input-materializer above.
       try {
         if (args.overwrite) {
           // link() fails if target exists; remove first when overwriting.
@@ -770,6 +777,24 @@ async function writeOutputsToDir(
   return { paths };
 }
 
+/**
+ * Insert `.out` before the file extension so a copy doesn't clobber the
+ * original. `foo.csv` → `foo.out.csv`; `foo` (no ext) → `foo.out`; existing
+ * `foo.out.csv` → `foo.out.out.csv` (the helper keeps stacking on retries).
+ *
+ * Multi-part extensions like `.tar.gz` get a single suffix at the rightmost
+ * dot (`archive.tar.out.gz`) — good enough for the runner's outputs, none
+ * of which currently emit doubled extensions.
+ */
+function appendOutSuffix(path: string): string {
+  const lastSep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const dir = lastSep >= 0 ? path.slice(0, lastSep + 1) : "";
+  const base = lastSep >= 0 ? path.slice(lastSep + 1) : path;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return `${dir}${base}.out`;
+  return `${dir}${base.slice(0, dot)}.out${base.slice(dot)}`;
+}
+
 // Test-only re-exports. The helpers above are deliberately private — the
 // tool_run handler is the only intended caller. Tests reach in via these
 // underscore-prefixed names so renames break compilation rather than silently
@@ -780,6 +805,7 @@ export const __test_normaliseInputContent = normaliseInputContent;
 export const __test_materializeContentInput = materializeContentInput;
 export const __test_inferContentFilename = inferContentFilename;
 export const __test_resolveInputPath = resolveInputPath;
+export const __test_appendOutSuffix = appendOutSuffix;
 
 function extractCredentialRefs(inputs: Record<string, unknown>): string[] {
   const refs = new Set<string>();
