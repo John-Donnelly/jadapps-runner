@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile, readFile, stat, link, copyFile, mkdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { McpDeps } from "../server.js";
 import type { FileRef, RunToken, StepDescriptor } from "../../types.js";
@@ -73,41 +73,54 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
   server.registerTool(
     "tool_run",
     {
-      title: "Run a tool by slug",
+      title: "Run a JAD tool against file input(s) on this machine",
       description:
-        "Execute a single tool with optional file inputs and config options.\n\n" +
-        "Three input modes, mix freely:\n" +
-        "  • files[]      — base64 inline; works for any MCP client but slow over " +
-        "JSON-RPC. Best for small files or non-loopback clients.\n" +
-        "  • inputPaths[] — absolute paths on the local filesystem. The runner " +
-        "hard-links (or copies cross-volume) each file into the per-run scratch " +
-        "dir. Zero network/protocol overhead — use this for anything over a few " +
-        "MB on a loopback MCP client.\n" +
-        "  • text         — plain-text alternative for text-based tools.\n\n" +
-        "Output: by default the primary output file is returned inline as a " +
-        "base64 resource (capped at 4 MB) and any extras are surfaced as " +
-        "runner:// URIs. Pass `outputDir` to instead write every output file to " +
-        "that directory and return the resulting paths — no base64 in the " +
-        "response, no inline size ceiling.",
+        "Run a JAD tool on a local file. Pick the input mode by what you actually " +
+        "have in hand — they're listed in order of preference:\n\n" +
+        "  1. inputContent — raw text content as a string. **USE THIS when the user " +
+        "pasted text into chat or the file body is already in your context.** The " +
+        "runner writes it to a file on disk for you. You never have to base64-encode " +
+        "anything; LLM-generated base64 is unreliable and slow.\n\n" +
+        "  2. inputPaths — absolute paths (or relative paths combined with `cwd`). " +
+        "**USE THIS when the user names a file or you can see one on disk.** " +
+        "Hard-linked into the per-run scratch dir; no wire transfer of file " +
+        "content. The original file is never modified.\n\n" +
+        "  3. files[] — base64 inline. **Last resort.** Works on any MCP client but " +
+        "slow over JSON-RPC and error-prone for LLMs to produce.\n\n" +
+        "Mix freely; all three resolve to the same FileRef[] the tool sees.\n\n" +
+        "Outputs: if you used inputPaths, the cleaned/converted file is written to " +
+        "`<dirname(inputPaths[0])>/jadapps-out/` by default and the response carries " +
+        "outputPaths. Override with an explicit `outputDir` (absolute). If you only " +
+        "used inputContent or files[], the response inlines the primary output " +
+        "as a small base64 resource (≤4 MB) unless you set outputDir explicitly.",
       inputSchema: {
-        slug: z.string().describe("Tool slug from tool_list"),
-        files: z
-          .array(
-            z.object({
-              filename: z.string(),
-              mimeType: z.string().default("application/octet-stream"),
-              base64: z.string().describe("Base64-encoded file contents"),
-            }),
-          )
+        slug: z.string().describe("Tool slug from tool_list (e.g. 'csv-cleaner', 'pdf-merge', 'image-resizer')"),
+        inputContent: z
+          .union([
+            z
+              .string()
+              .describe("Raw text content. Filename is inferred from slug + mimeType."),
+            z.array(
+              z.object({
+                filename: z.string(),
+                content: z.string().describe("Raw text content (not base64)"),
+                mimeType: z.string().optional(),
+              }),
+            ),
+          ])
           .optional()
-          .default([])
-          .describe("Inline (base64) file inputs"),
+          .describe(
+            "Inline text-content file inputs. Bypasses base64 entirely — preferred " +
+              "whenever the file body is already a string in your context.",
+          ),
         inputPaths: z
           .array(
             z.union([
-              z.string().describe("Absolute path to a local file"),
+              z
+                .string()
+                .describe("Path to a local file (absolute, or relative when `cwd` is set)"),
               z.object({
-                path: z.string().describe("Absolute path to a local file"),
+                path: z.string(),
                 mimeType: z.string().optional(),
                 filename: z
                   .string()
@@ -120,28 +133,67 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
           .default([])
           .describe(
             "Local-path file inputs. Hard-linked into scratch when possible; " +
-              "copied as a fallback for cross-volume paths. Avoids the base64 round-trip.",
+              "copied cross-volume. Avoids the base64 round-trip.",
+          ),
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute working directory used to resolve any relative entries in " +
+              "inputPaths. Required if any inputPaths entry isn't already absolute.",
+          ),
+        files: z
+          .array(
+            z.object({
+              filename: z.string(),
+              mimeType: z.string().default("application/octet-stream"),
+              base64: z.string().describe("Base64-encoded file contents"),
+            }),
+          )
+          .optional()
+          .default([])
+          .describe(
+            "Inline base64 file inputs. Last-resort mode — prefer inputContent " +
+              "for text or inputPaths for paths.",
           ),
         outputDir: z
           .string()
           .optional()
           .describe(
-            "If set, write output files here and return paths instead of inline " +
-              "base64. Created if it doesn't exist. Must be an absolute path.",
+            "Absolute directory to write outputs to. Defaults to " +
+              "`<dirname(inputPaths[0])>/jadapps-out/` when inputPaths is set. " +
+              "Created if it doesn't exist. When set, the response returns " +
+              "outputPaths instead of inline base64.",
           ),
         overwrite: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            "When outputDir is set, allow clobbering an existing file with the " +
-              "same name. Off by default; the call errors out if a target exists.",
+            "Allow clobbering an existing file with the same name in outputDir. " +
+              "Off by default; the call errors out if a target already exists.",
           ),
         options: z.record(z.unknown()).optional().default({}).describe("Tool config object"),
-        text: z.string().optional().describe("Plain text input (alternative to files for text-based tools)"),
+        text: z
+          .string()
+          .optional()
+          .describe(
+            "Plain text fed straight into the tool's options.text — for tools " +
+              "that natively consume strings rather than files (e.g. md-from-text).",
+          ),
       },
     },
-    async ({ slug, files, inputPaths, outputDir, overwrite, options, text }) => {
+    async ({
+      slug,
+      files,
+      inputContent,
+      inputPaths,
+      cwd,
+      outputDir,
+      overwrite,
+      options,
+      text,
+    }) => {
       const entry = await deps.catalogue.lookup(slug);
       if (!entry) {
         return {
@@ -171,10 +223,19 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
           ],
         };
       }
+      if (cwd !== undefined && !isAbsolute(cwd)) {
+        return {
+          isError: true,
+          content: [
+            { type: "text" as const, text: `cwd must be an absolute path; got ${cwd}` },
+          ],
+        };
+      }
 
       const runId = randomUUID();
       const scratchDir = deps.scratch.acquire(runId);
       const fileRefs: FileRef[] = [];
+      let firstResolvedInputPath: string | null = null;
       let concurrencyAcquired = false;
 
       try {
@@ -193,12 +254,30 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
           });
         }
 
+        // inputContent: write raw strings to scratch as files. Filename is
+        // either supplied explicitly or inferred from slug + mimeType.
+        const contentEntries = normaliseInputContent(inputContent, slug);
+        for (const entry of contentEntries) {
+          const materialized = await materializeContentInput(entry, scratchDir);
+          fileRefs.push(materialized);
+        }
+
         for (const entry of inputPaths ?? []) {
           const spec =
             typeof entry === "string"
               ? { path: entry, mimeType: undefined, filename: undefined }
               : entry;
-          const materialized = await materializePathInput(spec, scratchDir);
+          const resolved = resolveInputPath(spec.path, cwd);
+          if ("error" in resolved) {
+            return {
+              isError: true,
+              content: [{ type: "text" as const, text: resolved.error }],
+            };
+          }
+          const materialized = await materializePathInput(
+            { ...spec, path: resolved.path },
+            scratchDir,
+          );
           if ("error" in materialized) {
             return {
               isError: true,
@@ -206,6 +285,7 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
             };
           }
           fileRefs.push(materialized.ref);
+          if (firstResolvedInputPath === null) firstResolvedInputPath = resolved.path;
         }
 
         // Phase 9 pre-flight — same checks the HTTP slug-dispatch route does,
@@ -304,11 +384,23 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
           };
         }
 
+        // Default outputDir when the caller used inputPaths: write alongside
+        // the input under `./jadapps-out/`. This makes the natural request
+        // "clean this file" land the cleaned version next to the original
+        // without the caller having to spell out a target. Skipped when only
+        // inputContent or files[] was used — no anchor, so fall through to
+        // the inline base64 response.
+        const effectiveOutputDir =
+          outputDir ??
+          (firstResolvedInputPath
+            ? join(dirname(firstResolvedInputPath), "jadapps-out")
+            : undefined);
+
         // outputDir mode: write every output file to the caller's directory
         // and return paths. No base64 in the response, no 4 MB inline cap.
-        if (outputDir !== undefined) {
+        if (effectiveOutputDir !== undefined) {
           const written = await writeOutputsToDir({
-            outputDir,
+            outputDir: effectiveOutputDir,
             overwrite: !!overwrite,
             runId,
             outputRefs: result.fileRefs,
@@ -386,6 +478,156 @@ export function registerToolTools(server: McpServer, deps: McpDeps): void {
 
 async function sha256Hex(buf: Buffer): Promise<string> {
   return createHash("sha256").update(buf).digest("hex");
+}
+
+interface NormalisedContentEntry {
+  filename: string;
+  content: string;
+  mimeType: string | undefined;
+}
+
+/**
+ * Reshape the `inputContent` argument (string or array) into the array form
+ * the materializer wants, picking sensible filenames when the caller didn't
+ * supply one. Returns [] when the argument isn't set.
+ */
+function normaliseInputContent(
+  raw: unknown,
+  slug: string,
+): NormalisedContentEntry[] {
+  if (raw == null) return [];
+  if (typeof raw === "string") {
+    return [
+      {
+        filename: inferContentFilename(slug, undefined),
+        content: raw,
+        mimeType: undefined,
+      },
+    ];
+  }
+  if (Array.isArray(raw)) {
+    return raw.map((entry) => {
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as { filename?: unknown }).filename === "string" &&
+        typeof (entry as { content?: unknown }).content === "string"
+      ) {
+        const e = entry as { filename: string; content: string; mimeType?: string };
+        return { filename: e.filename, content: e.content, mimeType: e.mimeType };
+      }
+      throw new Error(
+        "inputContent array entries must be { filename, content, mimeType? } objects",
+      );
+    });
+  }
+  return [];
+}
+
+/**
+ * Infer a sensible filename for an inline-text input. Goes by an explicit
+ * mimeType first; falls back to the slug's family prefix.
+ *
+ * Conservative on purpose — when the model passes inputContent for an
+ * obviously-binary family (image/audio/video) we still let it through but
+ * label the file as `.bin` so anything downstream that branches on extension
+ * can fail loudly rather than silently mis-treating the bytes.
+ */
+function inferContentFilename(slug: string, mimeType: string | undefined): string {
+  if (mimeType) {
+    const byMime: Record<string, string> = {
+      "text/csv": "input.csv",
+      "text/tab-separated-values": "input.tsv",
+      "application/json": "input.json",
+      "application/x-ndjson": "input.ndjson",
+      "text/markdown": "input.md",
+      "text/html": "input.html",
+      "application/xml": "input.xml",
+      "text/xml": "input.xml",
+      "text/yaml": "input.yaml",
+      "application/yaml": "input.yaml",
+      "image/svg+xml": "input.svg",
+      "text/plain": "input.txt",
+    };
+    if (mimeType in byMime) return byMime[mimeType]!;
+  }
+  const family = (slug.split("-")[0] ?? "").toLowerCase();
+  const byFamily: Record<string, string> = {
+    csv: "input.csv",
+    json: "input.json",
+    md: "input.md",
+    markdown: "input.md",
+    html: "input.html",
+    pdf: "input.pdf",
+    xml: "input.xml",
+    yaml: "input.yaml",
+    svg: "input.svg",
+    excel: "input.xlsx",
+    image: "input.bin",
+    audio: "input.bin",
+    video: "input.bin",
+    archive: "input.bin",
+    font: "input.bin",
+  };
+  return byFamily[family] ?? "input.txt";
+}
+
+async function materializeContentInput(
+  entry: NormalisedContentEntry,
+  scratchDir: string,
+): Promise<FileRef> {
+  const buf = Buffer.from(entry.content, "utf8");
+  const safeName = entry.filename.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const sha = await sha256Hex(buf);
+  const ref = `${sha.slice(0, 16)}-${safeName}`;
+  await writeFile(join(scratchDir, ref), buf);
+  return {
+    ref,
+    bytes: buf.length,
+    sha256: sha,
+    mime: entry.mimeType ?? guessMimeFromName(entry.filename),
+    filename: entry.filename,
+  };
+}
+
+function guessMimeFromName(name: string): string {
+  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+  const map: Record<string, string> = {
+    csv: "text/csv",
+    tsv: "text/tab-separated-values",
+    json: "application/json",
+    ndjson: "application/x-ndjson",
+    md: "text/markdown",
+    html: "text/html",
+    xml: "application/xml",
+    yaml: "application/yaml",
+    yml: "application/yaml",
+    svg: "image/svg+xml",
+    txt: "text/plain",
+  };
+  return map[ext] ?? "application/octet-stream";
+}
+
+/**
+ * Resolve an inputPaths entry against the caller's `cwd`. Returns the
+ * absolute path or an explanation if relative and no cwd was supplied.
+ */
+function resolveInputPath(
+  path: string,
+  cwd: string | undefined,
+): { path: string } | { error: string } {
+  if (!path || typeof path !== "string") {
+    return { error: `inputPaths entry missing 'path'` };
+  }
+  if (isAbsolute(path)) return { path: resolve(path) };
+  if (!cwd) {
+    return {
+      error:
+        `inputPath '${path}' is relative; supply an absolute path or set 'cwd' ` +
+        `to an absolute working directory so the runner knows how to resolve it.`,
+    };
+  }
+  return { path: resolve(cwd, path) };
 }
 
 /**
@@ -534,6 +776,10 @@ async function writeOutputsToDir(
 // drifting from the production code path.
 export const __test_materializePathInput = materializePathInput;
 export const __test_writeOutputsToDir = writeOutputsToDir;
+export const __test_normaliseInputContent = normaliseInputContent;
+export const __test_materializeContentInput = materializeContentInput;
+export const __test_inferContentFilename = inferContentFilename;
+export const __test_resolveInputPath = resolveInputPath;
 
 function extractCredentialRefs(inputs: Record<string, unknown>): string[] {
   const refs = new Set<string>();
