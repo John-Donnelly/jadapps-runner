@@ -11,7 +11,159 @@ import type { McpDeps } from "../server.js";
  * Run results come back from the LocalWorkflowRunner. v0.1 supports linear
  * workflows; logic-node workflows surface a clear error directing the client
  * to the website orchestrator until the runner-side branching engine ships.
+ *
+ * GraphSchema normalises LLM-natural shapes into the canonical
+ * `lib/orchestrator/types.ts:WorkflowGraph` the dashboard canvas expects.
+ * The previous schema accepted `z.unknown()` which let agents save graphs
+ * the UI couldn't load (e.g. `{nodes:[{id:"csv-cleaner",name:"Clean"}],
+ * edges:[{from,to}]}`). Now we accept those shapes AS INPUT but rewrite to
+ * canonical before persisting.
  */
+
+interface CanonicalNode {
+  id: string;
+  toolSlug: string;
+  position: { x: number; y: number };
+  config: Record<string, unknown>;
+  label?: string;
+  category?: string;
+  errorPolicy?: "abort" | "retry" | "skip";
+  logicKind?: string;
+}
+
+interface CanonicalEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourcePort: string;
+  targetPort: string;
+  type?: string;
+}
+
+interface CanonicalGraph {
+  nodes: CanonicalNode[];
+  edges: CanonicalEdge[];
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+function pickObject(
+  obj: Record<string, unknown>,
+  keys: string[],
+): Record<string, unknown> | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+      return v as Record<string, unknown>;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Map a loose LLM-supplied node into the canonical shape.
+ *
+ * Aliases accepted:
+ *   - toolSlug ← `toolSlug` | `tool_slug` | `tool` | `slug`
+ *   - id       ← `id` | `nodeId`  (auto-generated if missing)
+ *   - config   ← `config` | `options` | `inputs` | `args`  (defaults `{}`)
+ *   - label    ← `label` | `name` | `title`
+ *
+ * Position auto-fills to a horizontal layout when missing — agents rarely
+ * know good coordinates, and the canvas is happy to load any valid pair.
+ */
+export function normalizeNode(loose: unknown, index: number): CanonicalNode {
+  if (typeof loose !== "object" || loose === null || Array.isArray(loose)) {
+    throw new Error(`node at index ${index} is not an object`);
+  }
+  const n = loose as Record<string, unknown>;
+  const toolSlug = pickString(n, ["toolSlug", "tool_slug", "tool", "slug"]);
+  if (!toolSlug) {
+    throw new Error(
+      `node at index ${index} is missing toolSlug. ` +
+        `Each node must reference a tool by slug from tool_list ` +
+        `(aliases accepted: tool, slug). Saw keys: ${Object.keys(n).join(", ")}`,
+    );
+  }
+  const id = pickString(n, ["id", "nodeId"]) ?? `n_${randomUUID().slice(0, 8)}`;
+  const posRaw = pickObject(n, ["position", "pos"]);
+  const position =
+    posRaw && typeof posRaw.x === "number" && typeof posRaw.y === "number"
+      ? { x: posRaw.x as number, y: posRaw.y as number }
+      : { x: 200 + index * 240, y: 200 };
+  const config = (pickObject(n, ["config", "options", "inputs", "args"]) ??
+    {}) as Record<string, unknown>;
+  const out: CanonicalNode = { id, toolSlug, position, config };
+  const label = pickString(n, ["label", "name", "title"]);
+  if (label) out.label = label;
+  const category = pickString(n, ["category"]);
+  if (category) out.category = category;
+  const errorPolicy = pickString(n, ["errorPolicy", "error_policy"]);
+  if (errorPolicy === "abort" || errorPolicy === "retry" || errorPolicy === "skip") {
+    out.errorPolicy = errorPolicy;
+  }
+  const logicKind = pickString(n, ["logicKind", "logic_kind"]);
+  if (logicKind) out.logicKind = logicKind;
+  return out;
+}
+
+/**
+ * Map a loose LLM-supplied edge into the canonical shape.
+ *
+ * Aliases accepted:
+ *   - source     ← `source` | `from` | `src`
+ *   - target     ← `target` | `to`   | `dst`
+ *   - sourcePort ← `sourcePort` | `source_port` | `outputPort`  (defaults "")
+ *   - targetPort ← `targetPort` | `target_port` | `inputPort`   (defaults "")
+ */
+export function normalizeEdge(loose: unknown, index: number): CanonicalEdge {
+  if (typeof loose !== "object" || loose === null || Array.isArray(loose)) {
+    throw new Error(`edge at index ${index} is not an object`);
+  }
+  const e = loose as Record<string, unknown>;
+  const source = pickString(e, ["source", "from", "src"]);
+  const target = pickString(e, ["target", "to", "dst"]);
+  if (!source || !target) {
+    throw new Error(
+      `edge at index ${index} missing source/target. ` +
+        `Each edge needs source and target node ids ` +
+        `(aliases accepted: from/to). Saw keys: ${Object.keys(e).join(", ")}`,
+    );
+  }
+  const out: CanonicalEdge = {
+    id: pickString(e, ["id"]) ?? `e_${randomUUID().slice(0, 8)}`,
+    source,
+    target,
+    sourcePort: pickString(e, ["sourcePort", "source_port", "outputPort"]) ?? "",
+    targetPort: pickString(e, ["targetPort", "target_port", "inputPort"]) ?? "",
+  };
+  const t = pickString(e, ["type"]);
+  if (t) out.type = t;
+  return out;
+}
+
+/**
+ * Top-level graph normaliser. Accepts the loose shape from
+ * `GraphSchema.parse(input)` (untyped arrays of objects) and returns the
+ * canonical graph the dashboard's orchestrator expects.
+ *
+ * On any node/edge that can't be normalised, throws with a useful message
+ * pointing at exactly which entry and which field was the problem — the
+ * MCP layer surfaces that as a tool-call error rather than persisting a
+ * graph the UI can't load.
+ */
+export function normalizeGraph(loose: { nodes: unknown[]; edges: unknown[] }): CanonicalGraph {
+  return {
+    nodes: loose.nodes.map((n, i) => normalizeNode(n, i)),
+    edges: loose.edges.map((e, i) => normalizeEdge(e, i)),
+  };
+}
 
 const GraphSchema = z.object({
   nodes: z.array(z.unknown()),
@@ -94,8 +246,39 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
     {
       title: "Create a new workflow",
       description:
-        "Create a new workflow draft. Saved locally with origin='local' and " +
-        "isPrivate=true; a background sync uploads it to the server within seconds.",
+        "Create a new workflow draft. Saved locally; a background sync uploads " +
+        "it to the server within seconds so the dashboard canvas can open it.\n\n" +
+        "Graph shape (the dashboard renders this on a canvas — supply the FIELDS " +
+        "below, not arbitrary JSON):\n\n" +
+        "  nodes: [\n" +
+        "    {\n" +
+        "      toolSlug:  '<slug from tool_list>',          // REQUIRED\n" +
+        "      id:        '<unique within workflow>',       // optional, auto-generated\n" +
+        "      position:  { x: 200, y: 200 },               // optional, auto-laid-out\n" +
+        "      config:    { ...per-tool options },          // optional, default {}\n" +
+        "    }\n" +
+        "  ]\n" +
+        "  edges: [\n" +
+        "    {\n" +
+        "      source:      '<source node id>',             // REQUIRED\n" +
+        "      target:      '<target node id>',             // REQUIRED\n" +
+        "      sourcePort:  '<source output port name>',    // optional, default ''\n" +
+        "      targetPort:  '<target input port name>',     // optional, default ''\n" +
+        "      id:          '<unique within workflow>',     // optional, auto-generated\n" +
+        "    }\n" +
+        "  ]\n\n" +
+        "Aliases tolerated: 'tool'/'slug' → toolSlug; 'from'/'to' → source/target.\n\n" +
+        "Worked example — clean a CSV and convert it to JSON:\n" +
+        "{\n" +
+        '  "name": "CSV → JSON",\n' +
+        '  "graph": {\n' +
+        '    "nodes": [\n' +
+        '      { "id": "n1", "toolSlug": "csv-cleaner" },\n' +
+        '      { "id": "n2", "toolSlug": "csv-to-json" }\n' +
+        "    ],\n" +
+        '    "edges": [ { "source": "n1", "target": "n2" } ]\n' +
+        "  }\n" +
+        "}",
       inputSchema: {
         name: z.string().min(1).max(120),
         description: z.string().max(2000).optional().default(""),
@@ -104,12 +287,21 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
       },
     },
     async ({ name, description, graph, scheduleCron }) => {
+      let normalized: CanonicalGraph;
+      try {
+        normalized = normalizeGraph(graph);
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error).message }],
+        };
+      }
       const id = randomUUID();
       const wf = deps.workflowStore.upsert({
         id,
         name,
         description: description ?? null,
-        graph: graph as Record<string, unknown>,
+        graph: normalized as unknown as Record<string, unknown>,
         serverSyncedAt: null,
         origin: "local",
         isPrivate: true,
@@ -151,11 +343,22 @@ export function registerWorkflowTools(server: McpServer, deps: McpDeps): void {
           content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
         };
       }
+      let nextGraph: unknown = existing.graph;
+      if (patch.graph !== undefined) {
+        try {
+          nextGraph = normalizeGraph(patch.graph);
+        } catch (err) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: (err as Error).message }],
+          };
+        }
+      }
       const wf = deps.workflowStore.upsert({
         id,
         name: patch.name ?? existing.name,
         description: patch.description ?? existing.description,
-        graph: (patch.graph ?? existing.graph) as Record<string, unknown>,
+        graph: nextGraph as Record<string, unknown>,
         serverSyncedAt: existing.serverSyncedAt,
         origin: existing.origin,
         isPrivate: patch.isPrivate ?? existing.isPrivate,
