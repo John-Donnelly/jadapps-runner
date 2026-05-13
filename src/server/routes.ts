@@ -24,6 +24,33 @@ import {
   violationToHttpBody,
 } from "../runtime/tier-limits.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
+import { probeHardware, type HardwareCaps } from "../runtime/hardware.js";
+
+export const RUNNER_VERSION = "0.1.0";
+
+export interface HealthBody {
+  ok: true;
+  name: "jadapps-runner";
+  version: string;
+  pid: number;
+  queueDepth: number;
+  hardware: HardwareCaps;
+}
+
+/**
+ * Assemble the /v1/health body. Exported so callers and tests can compose
+ * a response without depending on Fastify's request lifecycle.
+ */
+export function buildHealthBody(hardware: HardwareCaps): HealthBody {
+  return {
+    ok: true,
+    name: "jadapps-runner",
+    version: RUNNER_VERSION,
+    pid: process.pid,
+    queueDepth: 0,
+    hardware,
+  };
+}
 import {
   WORKFLOW_RUN_LIMIT,
   WORKFLOW_RUN_WINDOW_MS,
@@ -183,13 +210,13 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
     }
   });
 
-  const healthHandler = async () => ({
-    ok: true,
-    name: "jadapps-runner",
-    version: "0.1.0",
-    pid: process.pid,
-    queueDepth: 0,
-  });
+  // Kick off the hardware probe at route-registration time so the snapshot
+  // is usually warm by the time the first health request arrives. The
+  // module-level cache in runtime/hardware.ts dedupes if a request hits
+  // before this completes.
+  void probeHardware().catch(() => undefined);
+
+  const healthHandler = async () => buildHealthBody(await probeHardware());
   app.get("/health", healthHandler);
   app.get("/v1/health", healthHandler);
 
