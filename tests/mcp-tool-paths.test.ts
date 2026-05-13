@@ -34,6 +34,8 @@ import {
   __test_materializePathInput as materializePathInput,
   // @ts-expect-error — same.
   __test_writeOutputsToDir as writeOutputsToDir,
+  // @ts-expect-error — same.
+  __test_appendOutSuffix as appendOutSuffix,
 } from "../src/mcp/tools/tool";
 
 let tmp: string;
@@ -138,27 +140,76 @@ describe("writeOutputsToDir", () => {
     expect(readFileSync(result.paths[1]!, "utf8")).toBe('{"b":true}');
   });
 
-  it("refuses to clobber an existing file by default", async () => {
-    const ref = "deadbeefdeadbeef-clobber.txt";
+  it("appends .out before the extension when the destination exists (no overwrite)", async () => {
+    const ref = "deadbeefdeadbeef-collide.txt";
     writeFileSync(join(scratchDir, ref), "fresh");
     const outDir = join(tmp, "out-2");
     mkdirSync(outDir);
-    writeFileSync(join(outDir, "clobber.txt"), "OLD");
+    writeFileSync(join(outDir, "collide.txt"), "OLD");
     const result = await writeOutputsToDir({
       outputDir: outDir,
       overwrite: false,
       runId,
       outputRefs: [
-        { ref, bytes: 5, sha256: "2".repeat(64), mime: "text/plain", filename: "clobber.txt" },
+        { ref, bytes: 5, sha256: "2".repeat(64), mime: "text/plain", filename: "collide.txt" },
       ],
       scratch,
     });
-    expect("error" in result).toBe(true);
-    if ("error" in result) {
-      expect(result.error).toMatch(/already exists/);
-    }
+    expect("paths" in result).toBe(true);
+    if (!("paths" in result)) return;
+    expect(result.paths[0]).toBe(join(outDir, "collide.out.txt"));
     // Original is untouched
-    expect(readFileSync(join(outDir, "clobber.txt"), "utf8")).toBe("OLD");
+    expect(readFileSync(join(outDir, "collide.txt"), "utf8")).toBe("OLD");
+    // Renamed output landed alongside it
+    expect(readFileSync(join(outDir, "collide.out.txt"), "utf8")).toBe("fresh");
+  });
+
+  it("stacks .out suffixes when the renamed target also exists", async () => {
+    const ref = "facadefacadeface-stack.txt";
+    writeFileSync(join(scratchDir, ref), "NEW");
+    const outDir = join(tmp, "out-2b");
+    mkdirSync(outDir);
+    writeFileSync(join(outDir, "stack.txt"), "v1");
+    writeFileSync(join(outDir, "stack.out.txt"), "v2");
+    const result = await writeOutputsToDir({
+      outputDir: outDir,
+      overwrite: false,
+      runId,
+      outputRefs: [
+        { ref, bytes: 3, sha256: "5".repeat(64), mime: "text/plain", filename: "stack.txt" },
+      ],
+      scratch,
+    });
+    expect("paths" in result).toBe(true);
+    if (!("paths" in result)) return;
+    expect(result.paths[0]).toBe(join(outDir, "stack.out.out.txt"));
+    expect(readFileSync(join(outDir, "stack.txt"), "utf8")).toBe("v1");
+    expect(readFileSync(join(outDir, "stack.out.txt"), "utf8")).toBe("v2");
+    expect(readFileSync(join(outDir, "stack.out.out.txt"), "utf8")).toBe("NEW");
+  });
+
+  it("avoids in-run collisions between two outputs with the same filename", async () => {
+    const refA = "11111111aaaaaaaa-twin.json";
+    const refB = "22222222bbbbbbbb-twin.json";
+    writeFileSync(join(scratchDir, refA), "A");
+    writeFileSync(join(scratchDir, refB), "B");
+    const outDir = join(tmp, "out-2c");
+    const result = await writeOutputsToDir({
+      outputDir: outDir,
+      overwrite: false,
+      runId,
+      outputRefs: [
+        { ref: refA, bytes: 1, sha256: "6".repeat(64), mime: "application/json", filename: "twin.json" },
+        { ref: refB, bytes: 1, sha256: "7".repeat(64), mime: "application/json", filename: "twin.json" },
+      ],
+      scratch,
+    });
+    expect("paths" in result).toBe(true);
+    if (!("paths" in result)) return;
+    expect(result.paths[0]).toBe(join(outDir, "twin.json"));
+    expect(result.paths[1]).toBe(join(outDir, "twin.out.json"));
+    expect(readFileSync(result.paths[0]!, "utf8")).toBe("A");
+    expect(readFileSync(result.paths[1]!, "utf8")).toBe("B");
   });
 
   it("overwrites when overwrite: true", async () => {
@@ -197,5 +248,30 @@ describe("writeOutputsToDir", () => {
     if ("paths" in result) {
       expect(readFileSync(result.paths[0]!, "utf8")).toBe("ok");
     }
+  });
+});
+
+describe("appendOutSuffix", () => {
+  it("inserts .out before the rightmost dot", () => {
+    expect(appendOutSuffix("foo.csv")).toBe("foo.out.csv");
+    expect(appendOutSuffix("/abs/path/foo.csv")).toBe("/abs/path/foo.out.csv");
+    expect(appendOutSuffix("C:\\abs\\path\\foo.json")).toBe("C:\\abs\\path\\foo.out.json");
+  });
+
+  it("appends .out when there's no extension", () => {
+    expect(appendOutSuffix("foo")).toBe("foo.out");
+    expect(appendOutSuffix("/abs/foo")).toBe("/abs/foo.out");
+  });
+
+  it("treats dotfiles (no extension) as having no extension", () => {
+    expect(appendOutSuffix(".env")).toBe(".env.out");
+  });
+
+  it("stacks correctly when called on an already-renamed path", () => {
+    expect(appendOutSuffix("foo.out.csv")).toBe("foo.out.out.csv");
+  });
+
+  it("attaches a single suffix at the rightmost dot for multi-ext files", () => {
+    expect(appendOutSuffix("archive.tar.gz")).toBe("archive.tar.out.gz");
   });
 });
