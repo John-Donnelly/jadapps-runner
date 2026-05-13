@@ -27,12 +27,27 @@ import { WakeSocket } from "./dispatch/wake-socket.js";
 
 const STALE_SCRATCH_AGE_MS = 24 * 60 * 60 * 1000;
 
+export interface StartRunnerOptions {
+  /**
+   * Skip booting the loopback HTTP server. Used by the `mcp` CLI subcommand,
+   * which is spawned by Claude Desktop / Claude Code / Cursor as a stdio
+   * subprocess while the long-running daemon (Tauri shell or `start`) already
+   * owns :9789. Without this, the MCP subprocess would crash on EADDRINUSE.
+   *
+   * In headless mode `port` and `pairingToken` are `null` and the
+   * auto-dispatch poller is never started (the daemon handles dispatch).
+   */
+  headless?: boolean;
+}
+
 export interface Runner {
   shutdown(): Promise<void>;
   pairing: PairingService;
   tokens: TokenManager;
-  pairingToken: string;
-  port: number;
+  /** Null in headless mode — the HTTP server isn't booted. */
+  pairingToken: string | null;
+  /** Null in headless mode — the HTTP server isn't booted. */
+  port: number | null;
   apiBase: string;
   // Exposed for the `mcp` CLI subcommand — bypasses the HTTP layer and
   // hands these straight to McpServer over stdio. Keep the surface narrow.
@@ -53,11 +68,19 @@ export interface Runner {
   rateLimiter: RateLimiter;
 }
 
-/** Wire the dependency graph and start the local HTTP server. */
-export async function startRunner(): Promise<Runner> {
+/**
+ * Wire the dependency graph and start the local HTTP server.
+ *
+ * Pass `{ headless: true }` to skip the HTTP server entirely — used by the
+ * `mcp` CLI subcommand, which is launched as a subprocess by Claude Desktop /
+ * Cursor while a daemon already owns :9789.
+ */
+export async function startRunner(
+  opts: StartRunnerOptions = {},
+): Promise<Runner> {
   const cfg = loadConfig();
   const log = createLogger(cfg.logLevel);
-  log.info({ cfg }, "starting runner");
+  log.info({ cfg, headless: !!opts.headless }, "starting runner");
 
   const secrets = new SecretStore(cfg.dataDir);
   const api = new ApiClient(cfg.apiBase, log);
@@ -112,26 +135,31 @@ export async function startRunner(): Promise<Runner> {
 
   telemetry.start();
 
-  const server = await bootHttpServer({
-    cfg,
-    log,
-    executor,
-    credentials,
-    tokens,
-    telemetry,
-    scratch,
-    catalogue,
-    api,
-    workflowStore,
-    workflowSync,
-    localWorkflowRunner,
-    webhookStore,
-    webhookDispatcher,
-    eventQueue: queue,
-    concurrency,
-    license,
-    rateLimiter,
-  });
+  // In headless mode the long-running daemon already owns :9789 and serves
+  // every HTTP route; this process is just hosting the MCP stdio transport
+  // and needs the dep graph but nothing on the wire.
+  const server: ServerHandle | null = opts.headless
+    ? null
+    : await bootHttpServer({
+        cfg,
+        log,
+        executor,
+        credentials,
+        tokens,
+        telemetry,
+        scratch,
+        catalogue,
+        api,
+        workflowStore,
+        workflowSync,
+        localWorkflowRunner,
+        webhookStore,
+        webhookDispatcher,
+        eventQueue: queue,
+        concurrency,
+        license,
+        rateLimiter,
+      });
 
   // Best-effort sync on startup. Failures are logged inside WorkflowSync —
   // the runner stays usable even if the website is unreachable.
@@ -146,7 +174,8 @@ export async function startRunner(): Promise<Runner> {
 
   let poller: DispatchPoller | null = null;
   let wakeSocket: WakeSocket | null = null;
-  if (cfg.autoDispatch) {
+  // The MCP subprocess never claims queued runs — the daemon already does.
+  if (cfg.autoDispatch && !opts.headless) {
     poller = new DispatchPoller(
       cfg.apiBase,
       tokens,
@@ -192,8 +221,8 @@ export async function startRunner(): Promise<Runner> {
     shutdown,
     pairing,
     tokens,
-    pairingToken: server.pairingToken,
-    port: server.port,
+    pairingToken: server?.pairingToken ?? null,
+    port: server?.port ?? null,
     apiBase: cfg.apiBase,
     log,
     executor,
@@ -215,7 +244,7 @@ export async function startRunner(): Promise<Runner> {
 
 function makeShutdown(
   log: ReturnType<typeof createLogger>,
-  server: ServerHandle,
+  server: ServerHandle | null,
   telemetry: TelemetryClient,
   workers: WorkerPool,
   bundles: BundleLoader,
@@ -237,7 +266,7 @@ function makeShutdown(
       // Drain pending webhook deliveries before tearing down the HTTP
       // server — otherwise in-flight retries lose their store handle.
       await webhookDispatcher.flush().catch(() => undefined);
-      await server.shutdown();
+      if (server) await server.shutdown();
       await workers.shutdown();
       bundles.shutdown();
       await browserWorker.shutdown();
