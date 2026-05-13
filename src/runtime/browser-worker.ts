@@ -4,6 +4,8 @@ import type { ScratchManager } from "./scratch.js";
 import { writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { platform } from "node:os";
+import { probeHardware, type HardwareCaps } from "./hardware.js";
 
 /**
  * BrowserWorker dispatches "browser-native" runtime tools — those that need
@@ -74,7 +76,9 @@ interface PageHandle {
 }
 
 async function loadPlaywright(): Promise<{
-  chromium: { launch(opts: { headless: boolean }): Promise<BrowserHandle> };
+  chromium: {
+    launch(opts: { headless: boolean; args?: string[] }): Promise<BrowserHandle>;
+  };
 }> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,6 +90,39 @@ async function loadPlaywright(): Promise<{
         `in the runner to enable browser-native tools. Underlying: ${(err as Error).message}`,
     );
   }
+}
+
+/**
+ * Chromium launch args that turn on hardware-accelerated rasterisation +
+ * WebGPU when a GPU is available. Per-platform because the underlying
+ * graphics backend differs (Metal on macOS, D3D11 on Windows, Vulkan on
+ * Linux). Returns an empty array when no GPU was detected — let Chromium
+ * fall back to SwiftShader/software so the run still succeeds.
+ *
+ * Exported for unit testing.
+ */
+export function chromiumGpuArgs(hw: HardwareCaps, plat: string = platform()): string[] {
+  if (hw.gpu.length === 0) return [];
+  const args = [
+    "--enable-unsafe-webgpu",
+    "--enable-features=Vulkan,WebGPU",
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+  ];
+  switch (plat) {
+    case "darwin":
+      args.push("--use-angle=metal");
+      break;
+    case "win32":
+      args.push("--use-angle=d3d11");
+      break;
+    case "linux":
+      args.push("--use-angle=vulkan");
+      break;
+    default:
+      break;
+  }
+  return args;
 }
 
 export class BrowserWorker {
@@ -257,8 +294,16 @@ export class BrowserWorker {
 
   private async launchBrowser(): Promise<BrowserHandle> {
     const pw = await loadPlaywright();
-    this.log.info("launching headless chromium for browser-native tool dispatch");
-    return pw.chromium.launch({ headless: true });
+    const hw = await probeHardware();
+    const gpuArgs = chromiumGpuArgs(hw);
+    this.log.info(
+      {
+        gpuCount: hw.gpu.length,
+        webgpu: gpuArgs.length > 0,
+      },
+      "launching headless chromium for browser-native tool dispatch",
+    );
+    return pw.chromium.launch({ headless: true, args: gpuArgs });
   }
 
   private async cleanupContext(ctx: BrowserContextHandle): Promise<void> {
