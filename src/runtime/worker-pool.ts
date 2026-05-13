@@ -2,6 +2,7 @@ import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import type { Credential, FileRef, StepResult } from "../types.js";
 import type { Logger } from "../log.js";
 
@@ -23,13 +24,37 @@ interface SpawnInit {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// In dev (tsx) we run worker.ts; built we run dist/runtime/worker.js. Tests
-// can override via the `workerEntry` constructor arg (or the env var) to
-// point at the built artifact when running from the source tree.
+
+/**
+ * Locate worker.js / worker.ts across the three layouts the runner ships in.
+ * Same issue as resolveBuiltinModulePath: tsup bundles src/runtime/worker-pool.ts
+ * into dist/cli.js at the top level, so `__dirname` for the resolved code is
+ * `dist/` and `join(__dirname, "worker.js")` overshoots — the worker actually
+ * lives at `dist/runtime/worker.js`.
+ *
+ * Layouts:
+ *   - tsx dev:        __dirname = src/runtime,  entry = src/runtime/worker.ts
+ *   - tsup unbundled: __dirname = dist/runtime, entry = dist/runtime/worker.js
+ *   - tsup bundled:   __dirname = dist          entry = dist/runtime/worker.js
+ *
+ * `JADAPPS_RUNNER_WORKER_ENTRY` always wins so tests can pin an explicit path.
+ */
 function defaultWorkerEntry(): string {
-  if (process.env.JADAPPS_RUNNER_WORKER_ENTRY) return process.env.JADAPPS_RUNNER_WORKER_ENTRY;
-  if (process.env.JADAPPS_RUNNER_DEV === "true") return join(__dirname, "worker.ts");
-  return join(__dirname, "worker.js");
+  const override = process.env.JADAPPS_RUNNER_WORKER_ENTRY;
+  if (override) return override;
+  const ext = process.env.JADAPPS_RUNNER_DEV === "true" ? ".ts" : ".js";
+  const candidates = [
+    join(__dirname, `worker${ext}`),
+    join(__dirname, "runtime", `worker${ext}`),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  // Fall back to the original guess so the eventual `new Worker` error
+  // surfaces a recognizable path. Returns the first candidate (matches the
+  // historical pre-bundling layout) — same behavior as before this patch
+  // when neither file exists.
+  return candidates[0]!;
 }
 
 export class WorkerPool {

@@ -456,21 +456,30 @@ export function resolveBuiltinModulePath(toolId: string): string | null {
   const entry = BUILTIN_TOOLS[toolId];
   if (!entry) return null;
 
-  // __dirname is dist/runtime in production, src/runtime in dev (tsx).
-  // Walk up one to land at dist/ or src/, then into builtin-connectors/.
-  const root = join(__dirname, "..");
+  // The module file always lives at `<root>/builtin-connectors/<name>.<ext>`.
+  // What changes is the root, depending on how the runner was packaged:
+  //
+  // - tsx dev:        __dirname = src/runtime           → root = src
+  // - tsup unbundled: __dirname = dist/runtime          → root = dist
+  // - tsup bundled    __dirname = dist (cli.js merges   → root = dist
+  //   (Tauri MSI):    the runtime/* modules at the top)
+  //
+  // The Tauri shell uses the bundled layout, where `__dirname/..` overshoots
+  // one level and the resolver returns null even though the connector .js
+  // is sitting right there beside cli.js. Try the bundled layout first
+  // (most common in shipping installs), then the unbundled fallback.
   const ext = process.env.JADAPPS_RUNNER_DEV === "true" ? ".ts" : ".js";
-  const candidate = join(root, "builtin-connectors", `${entry.module}${ext}`);
-  if (existsSync(candidate)) return candidate;
-
-  // Fallback: try the other extension (handles edge cases where the env var
-  // isn't set the way we expect, e.g. `npm test` on a built artifact).
-  const fallback = join(
-    root,
-    "builtin-connectors",
-    `${entry.module}${ext === ".ts" ? ".js" : ".ts"}`,
-  );
-  return existsSync(fallback) ? fallback : null;
+  const otherExt = ext === ".ts" ? ".js" : ".ts";
+  const candidates = [
+    join(__dirname, "builtin-connectors", `${entry.module}${ext}`),
+    join(__dirname, "..", "builtin-connectors", `${entry.module}${ext}`),
+    join(__dirname, "builtin-connectors", `${entry.module}${otherExt}`),
+    join(__dirname, "..", "builtin-connectors", `${entry.module}${otherExt}`),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
 }
 
 export function isBuiltinTool(toolId: string): boolean {
