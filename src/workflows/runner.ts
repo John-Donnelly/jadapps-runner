@@ -15,6 +15,13 @@ import type { LocalWorkflow, WorkflowStore } from "./store.js";
 import { checkFamilyLimits } from "../runtime/tier-limits.js";
 import type { WebhookDispatcher } from "../webhooks/dispatcher.js";
 import type { WebhookPayload } from "../webhooks/types.js";
+import {
+  materializeContentInput,
+  materializePathInput,
+  normaliseInputContent,
+  resolveInputPath,
+  writeOutputsToDir,
+} from "../mcp/input-materialize.js";
 
 /**
  * Local linear workflow runner. Walks the graph topologically and pipes
@@ -80,6 +87,59 @@ export interface LocalRunResult {
   }>;
   durationMs: number;
   totalBytes: number;
+  /** FileRefs the last step produced — what `outputDir` was filled from. */
+  finalFiles?: FileRef[];
+  /**
+   * Absolute disk paths the final-step outputs were written to. Present only
+   * when the caller passed `outputDir` in RunOptions. Empty array when no
+   * outputs were produced; absent when no outputDir was requested.
+   */
+  outputPaths?: string[];
+}
+
+export interface RunOptions {
+  /**
+   * Files already in scratch under their own refs. Used when the caller has
+   * pre-materialised inputs; rare for MCP callers, who should use
+   * inputContent/inputPaths instead.
+   */
+  initialFiles?: FileRef[];
+  /**
+   * Raw text content to feed the first step. Written to scratch as a file
+   * inside this run's scratch dir; the first step sees a normal FileRef.
+   * Accepts a single string (filename inferred from the first node's slug)
+   * or `[{filename, content, mimeType?}, …]`.
+   */
+  inputContent?:
+    | string
+    | Array<{ filename: string; content: string; mimeType?: string | undefined }>;
+  /**
+   * Local-disk paths to feed the first step. Hard-linked into the run's
+   * scratch dir. Absolute paths required, OR relative paths combined with
+   * `cwd`.
+   */
+  inputPaths?: Array<
+    string | { path: string; mimeType?: string | undefined; filename?: string | undefined }
+  >;
+  /** Absolute working directory to resolve relative `inputPaths` against. */
+  cwd?: string;
+  /**
+   * Absolute directory to write the last step's output files to. The runner
+   * mkdirs recursively. When set, the return carries `outputPaths`; otherwise
+   * final outputs stay in scratch and are released when run() returns.
+   */
+  outputDir?: string;
+  /** Allow clobbering existing files in outputDir. Defaults false. */
+  overwrite?: boolean;
+  /** Per-step progress callback. */
+  onStep?: (info: {
+    stepIndex: number;
+    totalSteps: number;
+    nodeId: string;
+    toolSlug: string;
+    status: "done" | "error" | "skipped";
+    durationMs: number;
+  }) => void;
 }
 
 export class LocalWorkflowRunner {
@@ -101,24 +161,13 @@ export class LocalWorkflowRunner {
 
   async run(
     workflow: LocalWorkflow,
-    initialFiles: FileRef[] = [],
-    /**
-     * Optional progress callback invoked once per finished step. Used by the
-     * MCP `workflow_run` tool to emit `notifications/progress` to the
-     * client so AI agents can show per-step progress UI.
-     */
-    onStep?: (info: {
-      stepIndex: number;
-      totalSteps: number;
-      nodeId: string;
-      toolSlug: string;
-      status: "done" | "error" | "skipped";
-      durationMs: number;
-    }) => void,
+    opts: RunOptions = {},
   ): Promise<LocalRunResult> {
     const start = Date.now();
     const runId = randomUUID();
     const graph = workflow.graph as unknown as WorkflowGraph;
+    const initialFiles = opts.initialFiles ?? [];
+    const onStep = opts.onStep;
 
     // Topological order. For v0.1 (linear only), we just sort nodes by their
     // first appearance in the edges array; if there are no edges we run in
@@ -129,14 +178,44 @@ export class LocalWorkflowRunner {
     let totalBytes = 0;
     let currentFiles: FileRef[] = initialFiles;
 
-    const completeRun = (ok: boolean): LocalRunResult => {
+    const completeRun = async (ok: boolean): Promise<LocalRunResult> => {
       const result: LocalRunResult = {
         runId,
         ok,
         steps,
         durationMs: Date.now() - start,
         totalBytes,
+        finalFiles: currentFiles,
       };
+      // If the caller asked for the outputs on disk and the run succeeded,
+      // copy them out BEFORE the finally block releases the scratch dir.
+      // On failure we deliberately skip — there's nothing the caller would
+      // want from a half-finished pipeline at a stable named location.
+      if (ok && opts.outputDir && currentFiles.length > 0) {
+        const written = await writeOutputsToDir({
+          outputDir: opts.outputDir,
+          overwrite: !!opts.overwrite,
+          runId,
+          outputRefs: currentFiles,
+          scratch: this.scratch,
+        });
+        if ("error" in written) {
+          // Surface as a final-step error so the run is reported as failed.
+          steps.push({
+            nodeId: "__outputDir__",
+            toolSlug: "outputDir.write",
+            status: "error",
+            durationMs: 0,
+            bytesProcessed: 0,
+            error: written.error,
+          });
+          result.ok = false;
+        } else {
+          result.outputPaths = written.paths;
+        }
+      } else if (opts.outputDir) {
+        result.outputPaths = [];
+      }
       this.fireWebhook(workflow, result);
       return result;
     };
@@ -145,12 +224,68 @@ export class LocalWorkflowRunner {
     try {
       access = await this.tokens.getAccessToken();
     } catch (err) {
-      return completeRun(false);
+      return await completeRun(false);
     }
 
     // Acquire a single scratch dir for the whole run so step outputs can
     // flow into the next step's inputs without copying.
-    this.scratch.acquire(runId);
+    const scratchDir = this.scratch.acquire(runId);
+
+    // Materialise inputContent + inputPaths into scratch BEFORE the first
+    // step runs so they appear as normal FileRefs to the executor. Order:
+    // inputContent first, then inputPaths, then any pre-materialised
+    // initialFiles. Errors surface as a failed-before-first-step result.
+    try {
+      const firstSlug = ordered[0]?.toolSlug ?? "workflow";
+      for (const entry of normaliseInputContent(opts.inputContent, firstSlug)) {
+        const ref = await materializeContentInput(entry, scratchDir);
+        currentFiles = [...currentFiles, ref];
+      }
+      for (const raw of opts.inputPaths ?? []) {
+        const spec =
+          typeof raw === "string"
+            ? { path: raw, mimeType: undefined, filename: undefined }
+            : raw;
+        const resolved = resolveInputPath(spec.path, opts.cwd);
+        if ("error" in resolved) {
+          steps.push({
+            nodeId: "__input__",
+            toolSlug: "workflow.input",
+            status: "error",
+            durationMs: 0,
+            bytesProcessed: 0,
+            error: resolved.error,
+          });
+          return await completeRun(false);
+        }
+        const materialised = await materializePathInput(
+          { ...spec, path: resolved.path },
+          scratchDir,
+        );
+        if ("error" in materialised) {
+          steps.push({
+            nodeId: "__input__",
+            toolSlug: "workflow.input",
+            status: "error",
+            durationMs: 0,
+            bytesProcessed: 0,
+            error: materialised.error,
+          });
+          return await completeRun(false);
+        }
+        currentFiles = [...currentFiles, materialised.ref];
+      }
+    } catch (err) {
+      steps.push({
+        nodeId: "__input__",
+        toolSlug: "workflow.input",
+        status: "error",
+        durationMs: 0,
+        bytesProcessed: 0,
+        error: (err as Error).message,
+      });
+      return await completeRun(false);
+    }
 
     const totalSteps = ordered.length;
     /**
@@ -209,7 +344,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: `Local runner doesn't execute ${node.toolSlug} — port routing requires the website orchestrator. Use workflow_run_enqueue instead.`,
           });
-          return completeRun(false);
+          return await completeRun(false);
         }
 
         const entry = await this.catalogue.lookup(node.toolSlug);
@@ -222,7 +357,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: `tool "${node.toolSlug}" has no runner bundle (browser-only fallback)`,
           });
-          return completeRun(false);
+          return await completeRun(false);
         }
 
         // Phase 9 pre-flight, Phase 11 deferred follow-up: closes the
@@ -240,7 +375,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: `tier_limit_exceeded: ${violation.type} cap ${violation.value} (observed ${violation.observed})`,
           });
-          return completeRun(false);
+          return await completeRun(false);
         }
 
         const runToken: RunToken = {
@@ -289,7 +424,7 @@ export class LocalWorkflowRunner {
             bytesProcessed: 0,
             error: (err as Error).message,
           });
-          return completeRun(false);
+          return await completeRun(false);
         }
 
         pushStep(stepIndex, {
@@ -302,12 +437,12 @@ export class LocalWorkflowRunner {
         });
         totalBytes += result.bytesProcessed;
         if (!result.ok) {
-          return completeRun(false);
+          return await completeRun(false);
         }
         currentFiles = result.fileRefs;
       }
 
-      return completeRun(true);
+      return await completeRun(true);
     } finally {
       this.scratch.release(runId);
     }
