@@ -24,6 +24,7 @@ import { RateLimiter } from "./runtime/rate-limit.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
 import { DispatchPoller } from "./dispatch/poller.js";
 import { WakeSocket } from "./dispatch/wake-socket.js";
+import { probeHardware } from "./runtime/hardware.js";
 
 const STALE_SCRATCH_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -111,6 +112,30 @@ export async function startRunner(): Promise<Runner> {
   );
 
   telemetry.start();
+
+  // Kick off the hardware probe eagerly. The result is cached for the
+  // process lifetime; downstream consumers (ffmpeg encoder selector,
+  // browser worker, /v1/health) all read the same snapshot. Warn if
+  // sharp/libvips isn't running with SIMD — that's a 2–4× perf hit
+  // on image transforms and is usually a packaging bug, not user choice.
+  void probeHardware().then((hw) => {
+    log.info(
+      {
+        cpuCores: hw.cpu.cores,
+        gpuCount: hw.gpu.length,
+        ffmpegEncoders: hw.ffmpeg.hardwareEncoders.length,
+        simd: hw.image.simd,
+      },
+      "hardware probe complete",
+    );
+    if (!hw.image.simd) {
+      log.warn(
+        "sharp/libvips is loaded without SIMD support. Image transforms will " +
+          "run scalar-only and be noticeably slower. Reinstall sharp with the " +
+          "default prebuilt binary, or rebuild against a libvips with AVX2/NEON.",
+      );
+    }
+  });
 
   const server = await bootHttpServer({
     cfg,
