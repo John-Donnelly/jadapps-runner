@@ -29,6 +29,8 @@ import {
   WORKFLOW_RUN_WINDOW_MS,
   type RateLimiter,
 } from "../runtime/rate-limit.js";
+import type { SettingsStore } from "../settings/store.js";
+import { validatePatch } from "../settings/store.js";
 
 const StepSchema = z.object({
   runId: z.string().min(1),
@@ -99,6 +101,7 @@ interface Deps {
   webhookDispatcher: WebhookDispatcher;
   concurrency: ConcurrencyLimiter;
   rateLimiter: RateLimiter;
+  settings: SettingsStore;
   log: Logger;
   pairingToken: string;
 }
@@ -475,6 +478,44 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
   app.delete<{ Params: { ref: string } }>("/v1/credentials/:ref", async (req) => {
     const ok = deps.credentials.delete(req.params.ref);
     return { ok };
+  });
+
+  // ─── Settings (Phase B) ───────────────────────────────────────────────────
+  // Tray-driven: the desktop host calls GET to populate the menu, PATCH
+  // when the user picks a new folder via the OS picker. Loopback only —
+  // same Bearer-token gate as the rest of /v1/*.
+
+  app.get("/v1/settings", async () => {
+    return deps.settings.get();
+  });
+
+  const SettingsPatchSchema = z
+    .object({
+      outputDir: z.string().min(1).optional(),
+      perToolSubfolders: z.boolean().optional(),
+    })
+    .strict();
+
+  app.patch("/v1/settings", async (req, reply) => {
+    const parsed = SettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "invalid body", issues: parsed.error.issues });
+      return;
+    }
+    // Strip undefined fields so exactOptionalPropertyTypes is satisfied.
+    const patch: Parameters<typeof validatePatch>[0] = {};
+    if (parsed.data.outputDir !== undefined) patch.outputDir = parsed.data.outputDir;
+    if (parsed.data.perToolSubfolders !== undefined) {
+      patch.perToolSubfolders = parsed.data.perToolSubfolders;
+    }
+    const validation = validatePatch(patch);
+    if (!validation.ok) {
+      reply.code(400).send({ error: "invalid settings", issues: validation.errors });
+      return;
+    }
+    const updated = deps.settings.apply(validation.value);
+    deps.log.info({ patch: validation.value }, "settings updated");
+    return updated;
   });
 
   // ─── Webhooks (runner-managed) ────────────────────────────────────────────

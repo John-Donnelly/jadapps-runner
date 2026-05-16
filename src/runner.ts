@@ -27,6 +27,7 @@ import { RateLimiter } from "./runtime/rate-limit.js";
 import { bootHttpServer, type ServerHandle } from "./server/http.js";
 import { DispatchPoller } from "./dispatch/poller.js";
 import { WakeSocket } from "./dispatch/wake-socket.js";
+import { SettingsStore } from "./settings/store.js";
 
 const STALE_SCRATCH_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -54,6 +55,7 @@ export interface Runner {
   concurrency: ConcurrencyLimiter;
   license: LicenseManager;
   rateLimiter: RateLimiter;
+  settings: SettingsStore;
 }
 
 /** Wire the dependency graph and start the local HTTP server. */
@@ -78,6 +80,9 @@ export async function startRunner(): Promise<Runner> {
 
   const credentials = new CredentialStore(paths(cfg).sqlite, secrets);
   await credentials.init();
+
+  const settings = new SettingsStore(credentials.rawDb());
+  settings.init();
 
   const workflowStore = new WorkflowStore(credentials.rawDb());
   workflowStore.init();
@@ -142,6 +147,7 @@ export async function startRunner(): Promise<Runner> {
     concurrency,
     license,
     rateLimiter,
+    settings,
   });
 
   // Best-effort sync on startup. Failures are logged inside WorkflowSync —
@@ -221,6 +227,7 @@ export async function startRunner(): Promise<Runner> {
     concurrency,
     license,
     rateLimiter,
+    settings,
   };
 }
 

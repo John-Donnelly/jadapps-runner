@@ -23,6 +23,7 @@ import type { WebhookDispatcher } from "../webhooks/dispatcher.js";
 import type { ConcurrencyLimiter } from "../runtime/concurrency.js";
 import type { RateLimiter } from "../runtime/rate-limit.js";
 import type { LicenseManager } from "../auth/license.js";
+import type { SettingsStore } from "../settings/store.js";
 import { mountMcpHttp } from "../mcp/http-transport.js";
 
 const PAIRING_TOKEN_FILE = "pairing-token";
@@ -53,6 +54,7 @@ interface BootOptions {
   concurrency: ConcurrencyLimiter;
   license: LicenseManager;
   rateLimiter: RateLimiter;
+  settings: SettingsStore;
 }
 
 export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
@@ -104,6 +106,7 @@ export async function bootHttpServer(opts: BootOptions): Promise<ServerHandle> {
     webhookDispatcher: opts.webhookDispatcher,
     concurrency: opts.concurrency,
     rateLimiter: opts.rateLimiter,
+    settings: opts.settings,
     log: opts.log,
     pairingToken,
   });
