@@ -23,7 +23,8 @@
     "tauri": "tauri",
     "tauri:dev": "npm run build && tauri dev",
     "tauri:build": "npm run build && tauri build",
-    "tauri:stage": "node scripts/stage-tauri-bundle.mjs"
+    "tauri:stage": "node scripts/stage-tauri-bundle.mjs",
+    "winui:stage": "node scripts/stage-winui-bundle.mjs"
   },
   "engines": {
     "node": ">=20.10.0"
