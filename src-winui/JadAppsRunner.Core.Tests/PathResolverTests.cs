@@ -31,16 +31,16 @@ public class PathResolverTests
     }
 
     [Fact]
-    public void SidecarEntry_PointsAtAssetsRuntimeBundleCliJs()
+    public void SidecarEntry_PointsAtRuntimeBundleCliJs()
     {
         var entry = PathResolver.SidecarEntry(@"C:\Program Files\JAD\Runner");
-        Assert.Equal(@"C:\Program Files\JAD\Runner\Assets\runtime-bundle\cli.js", entry);
+        Assert.Equal(@"C:\Program Files\JAD\Runner\runtime-bundle\cli.js", entry);
     }
 
     [Fact]
-    public void SidecarNode_PointsAtAssetsRuntimeBundleNodeExe()
+    public void SidecarNode_PointsAtRuntimeBundleNodeExe()
     {
         var node = PathResolver.SidecarNode(@"C:\Program Files\JAD\Runner");
-        Assert.Equal(@"C:\Program Files\JAD\Runner\Assets\runtime-bundle\node.exe", node);
+        Assert.Equal(@"C:\Program Files\JAD\Runner\runtime-bundle\node.exe", node);
     }
 }

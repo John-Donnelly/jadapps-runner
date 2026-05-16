@@ -38,12 +38,12 @@ public static class PathResolver
 
     /// <summary>
     /// Resolves the bundled <c>cli.js</c>. The MSIX layout drops the
-    /// staged runtime bundle under <c>&lt;appdir&gt;\Assets\runtime-bundle\</c>;
-    /// dev builds run against <c>&lt;repo&gt;\dist\cli.js</c>.
+    /// staged runtime bundle at <c>&lt;appdir&gt;\runtime-bundle\</c>
+    /// (NOT under Assets/ — the PRI scanner would index it).
     /// </summary>
     public static string SidecarEntry(string appBaseDir)
     {
-        return Path.Combine(appBaseDir, "Assets", "runtime-bundle", "cli.js");
+        return Path.Combine(appBaseDir, "runtime-bundle", "cli.js");
     }
 
     /// <summary>
@@ -52,6 +52,6 @@ public static class PathResolver
     /// </summary>
     public static string SidecarNode(string appBaseDir)
     {
-        return Path.Combine(appBaseDir, "Assets", "runtime-bundle", "node.exe");
+        return Path.Combine(appBaseDir, "runtime-bundle", "node.exe");
     }
 }

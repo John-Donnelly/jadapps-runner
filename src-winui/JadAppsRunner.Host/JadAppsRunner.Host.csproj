@@ -28,6 +28,22 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>JadAppsRunner.Host</AssemblyName>
+    <!--
+      Opt out of the XAML-generated Main so we can wire AppInstance
+      redirection (single-instance enforcement) before the XAML
+      runtime takes the thread.
+    -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!--
+      MakePri.exe emits a flood of warnings (PRI249 "Invalid qualifier",
+      PRI257 ditto, PRI263 "no default resource given") for every file
+      in runtime-bundle/ — it tries to interpret Node filenames like
+      package-lock.json or trie.json as resource qualifiers and complains
+      when they don't match a known qualifier. These are purely cosmetic
+      — Node bundle files are not WinRT resources — but they crowd out
+      real warnings. Demote the whole family to messages.
+    -->
+    <MSBuildWarningsAsMessages>PRI249;PRI257;PRI263</MSBuildWarningsAsMessages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -59,11 +75,32 @@
     <Exec Command="node ../../scripts/stage-winui-bundle.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="true" />
   </Target>
 
+  <!--
+    Runtime bundle: ship via <None> rather than <Content> so the
+    WinAppSDK PRI indexer doesn't auto-scan it. Content items are
+    automatically added to the PRI input set, which causes MakePri.exe
+    to flood the build log with PRI249 ("Invalid qualifier") and
+    PRI263 ("no default resource") for every Node file with a dash
+    or dot in its name. None items get the same CopyToOutputDirectory
+    treatment without being indexed.
+
+    AppxPackagePayload explicitly enumerates the files for the MSIX
+    package so they end up inside the .msix even though they're <None>.
+  -->
   <ItemGroup>
-    <Content Include="Assets\runtime-bundle\**\*"
-             Condition="Exists('Assets\runtime-bundle')"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+    <None Include="runtime-bundle\**\*"
+          Condition="Exists('runtime-bundle')"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="AddRuntimeBundleToAppxPayload" BeforeTargets="GenerateAppxManifest">
+    <ItemGroup>
+      <AppxPackagePayload Include="runtime-bundle\**\*"
+                          Condition="Exists('runtime-bundle')">
+        <TargetPath>runtime-bundle\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      </AppxPackagePayload>
+    </ItemGroup>
+  </Target>
 
 </Project>

@@ -23,11 +23,14 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
+// Drop the bundle next to the .exe (NOT under Assets/) so the
+// WinAppSDK PRI scanner doesn't mistake Node filenames like
+// `package-lock.json` or `test-d.ts` for resource qualifiers.
+// PathResolver.SidecarEntry / SidecarNode look here as well.
 const stage = join(
   root,
   "src-winui",
   "JadAppsRunner.Host",
-  "Assets",
   "runtime-bundle",
 );
 

@@ -30,7 +30,7 @@ dotnet test JadAppsRunner.Core.Tests
 ```powershell
 # From the repo root
 npm run build           # tsup → dist/
-npm run winui:stage     # stages Assets/runtime-bundle/ via shared script
+npm run winui:stage     # stages runtime-bundle/ via shared script
 dotnet build src-winui/JadAppsRunner.Host -c Release
 ```
 
