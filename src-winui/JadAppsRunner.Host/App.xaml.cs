@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using JadAppsRunner.Core;
 using Microsoft.UI.Xaml;
+using WinRT.Interop;
 
 namespace JadAppsRunner.Host;
 
@@ -21,12 +22,23 @@ public partial class App : Application
 {
     private SidecarSupervisor? _supervisor;
     private TrayMenu? _tray;
+    private Window? _ownerWindow;
+    private IntPtr _ownerHwnd;
     private readonly HttpClient _http = new();
 
     public App()
     {
         InitializeComponent();
     }
+
+    /// <summary>
+    /// Hidden owner window's HWND, exposed so the FolderPicker dialog
+    /// can call <c>InitializeWithWindow.Initialize(picker, hwnd)</c>.
+    /// Without this the picker has no owner and unpackaged dev runs
+    /// fail outright; even MSIX-packaged runs benefit because the
+    /// dialog otherwise opens in an unpredictable z-order.
+    /// </summary>
+    public IntPtr OwnerHwnd => _ownerHwnd;
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -62,8 +74,16 @@ public partial class App : Application
             logSink: line => Console.Error.WriteLine($"[sidecar] {line}"));
         _ = _supervisor.StartAsync();
 
+        // Hidden owner window. Required because WinUI3 dialogs
+        // (FolderPicker, FileSavePicker, MessageDialog) need an HWND
+        // anchor — there's no implicit "current window" in WinUI3
+        // like there was in UWP. The window is kept off-screen and
+        // never shown to the user.
+        _ownerWindow = new Window();
+        _ownerHwnd = WindowNative.GetWindowHandle(_ownerWindow);
+
         var settings = new SettingsClient(_http);
-        _tray = new TrayMenu(_supervisor, settings);
+        _tray = new TrayMenu(_supervisor, settings, () => OwnerHwnd);
         _tray.Show();
     }
 }

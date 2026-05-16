@@ -6,6 +6,7 @@ using JadAppsRunner.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage.Pickers;
+using WinRT.Interop;
 
 namespace JadAppsRunner.Host;
 
@@ -26,14 +27,19 @@ public sealed class TrayMenu
 {
     private readonly SidecarSupervisor _supervisor;
     private readonly SettingsClient _settings;
+    private readonly Func<IntPtr> _ownerHwndProvider;
     private TaskbarIcon? _icon;
     private MenuFlyoutItem? _statusItem;
     private MenuFlyoutItem? _outputItem;
 
-    public TrayMenu(SidecarSupervisor supervisor, SettingsClient settings)
+    public TrayMenu(
+        SidecarSupervisor supervisor,
+        SettingsClient settings,
+        Func<IntPtr> ownerHwndProvider)
     {
         _supervisor = supervisor;
         _settings = settings;
+        _ownerHwndProvider = ownerHwndProvider;
     }
 
     public void Show()
@@ -131,12 +137,21 @@ public sealed class TrayMenu
 
     private async System.Threading.Tasks.Task PickOutputFolderAsync()
     {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Documents };
+        var picker = new FolderPicker
+        {
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+        };
         picker.FileTypeFilter.Add("*");
-        // WinUI3 FolderPicker requires HWND init; without a visible
-        // window we'd need WinRT.Interop.InitializeWithWindow against
-        // the icon's HWND. Left to a follow-up: implement a hidden
-        // owner window in App.OnLaunched and pass its HWND here.
+
+        // WinUI3 FolderPicker requires an HWND anchor. Without it, the
+        // call throws E_INVALIDARG on unpackaged dev runs, and even in
+        // MSIX-packaged runs the dialog can open behind other windows.
+        var hwnd = _ownerHwndProvider();
+        if (hwnd != IntPtr.Zero)
+        {
+            InitializeWithWindow.Initialize(picker, hwnd);
+        }
+
         var folder = await picker.PickSingleFolderAsync();
         if (folder is null)
         {
