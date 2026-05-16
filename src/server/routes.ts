@@ -4,7 +4,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { writeFile, stat, statfs, mkdir } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { Executor } from "../runtime/executor.js";
 import type { CredentialStore } from "../credentials/store.js";
 import type { TokenManager } from "../auth/tokens.js";
@@ -165,17 +164,6 @@ const WorkflowBody = z.object({
   scheduleCron: z.string().nullable().optional(),
   isPrivate: z.boolean().optional().default(true),
 });
-
-const OUTPUTS_DIRNAME = "jadapps-outputs";
-
-/**
- * Resolve the user-visible outputs directory under their home dir. Built-in
- * Downloads/JAD pattern keeps everything under one OS-aware folder users can
- * find easily ("~/jadapps-outputs/<runId>/<filename>").
- */
-function outputsDirFor(runId: string): string {
-  return join(homedir(), OUTPUTS_DIRNAME, runId);
-}
 
 export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<void> {
   app.addHook("onRequest", async (req, reply) => {
@@ -375,8 +363,9 @@ export async function registerRoutes(app: FastifyInstance, deps: Deps): Promise<
         // For successful runs that produced output files (returned via fileRefs
         // on the StepResult), copy the first one to the user's outputs dir and
         // surface its absolute path as outputPath. This matches the website's
-        // RunnerJobResult contract.
-        const outDir = outputsDirFor(runId);
+        // RunnerJobResult contract. Path comes from SettingsStore so the user's
+        // tray-picked folder (and per-tool subfolder toggle) is honoured.
+        const outDir = deps.settings.resolveOutputDir(runId, entry.slug);
         let outputPath = "";
         let filename = "";
         let mimeType = "application/json";
