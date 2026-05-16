@@ -6,6 +6,7 @@ import { createLogger } from "./log.js";
 import { SecretStore } from "./auth/keychain.js";
 import { ApiClient } from "./api/client.js";
 import { PairingService } from "./auth/pairing.js";
+import { PreauthRedeemer } from "./auth/preauth.js";
 import { startRunner } from "./runner.js";
 
 const program = new Command();
@@ -66,40 +67,90 @@ program
 
 program
   .command("pair")
-  .description("Begin the pairing flow with jadapps.app.")
+  .description(
+    "Pair this runner with jadapps.app. " +
+      "With --token, redeems a preauth token non-interactively (used by " +
+      "the desktop installer / custom URL protocol activation); without " +
+      "--token, prints a 6-digit code and polls until the user confirms " +
+      "on jadapps.app.",
+  )
   .option("-n, --name <name>", "Friendly device name", hostname())
   .option("--no-poll", "Just print the code; don't poll for confirmation")
-  .action(async (opts: { name: string; poll: boolean }) => {
-    const cfg = loadConfig();
-    const log = createLogger(cfg.logLevel);
-    const secrets = new SecretStore(cfg.dataDir);
-    const api = new ApiClient(cfg.apiBase, log);
-    const pairing = new PairingService(cfg, secrets, api);
-    if (pairing.isPaired()) {
-      process.stderr.write(
-        "Runner is already paired. Run `jadapps-runner unpair` first.\n",
-      );
-      process.exitCode = 1;
-      return;
-    }
+  .option(
+    "--token <preauthToken>",
+    "Redeem a pre-authorized pairing token (non-interactive)",
+  )
+  .option(
+    "--platform <tag>",
+    "Platform tag forwarded with --token (e.g. win32-msix, win32-tauri, darwin)",
+  )
+  .action(
+    async (opts: {
+      name: string;
+      poll: boolean;
+      token?: string;
+      platform?: string;
+    }) => {
+      const cfg = loadConfig();
+      const log = createLogger(cfg.logLevel);
+      const secrets = new SecretStore(cfg.dataDir);
+      const api = new ApiClient(cfg.apiBase, log);
 
-    const { code, deepLink } = await pairing.beginPairing(opts.name);
-    process.stdout.write(
-      `\nPairing code:  ${code}\n` +
-        `Open this link while signed in to confirm:\n  ${deepLink}\n` +
-        `\nWaiting for confirmation${opts.poll ? "" : " (skipped, --no-poll)"}…\n`,
-    );
-
-    if (opts.poll) {
-      try {
-        const id = await pairing.pollPairing();
-        process.stdout.write(`\nPaired. deviceId=${id.deviceId} userId=${id.userId}\n`);
-      } catch (err) {
-        process.stderr.write(`\nPairing failed: ${(err as Error).message}\n`);
-        process.exitCode = 1;
+      // Silent path: redeem a preauth token. No code, no polling.
+      if (opts.token) {
+        const redeemer = new PreauthRedeemer({ cfg, secrets, api, log });
+        if (redeemer.isPaired()) {
+          process.stderr.write(
+            "Runner is already paired. Run `jadapps-runner unpair` first.\n",
+          );
+          process.exitCode = 1;
+          return;
+        }
+        try {
+          const id = await redeemer.redeem(opts.token, {
+            deviceName: opts.name,
+            ...(opts.platform ? { platformTag: opts.platform } : {}),
+          });
+          process.stdout.write(
+            `Paired via preauth token. deviceId=${id.deviceId} userId=${id.userId}\n`,
+          );
+        } catch (err) {
+          process.stderr.write(
+            `\nPreauth redemption failed: ${(err as Error).message}\n`,
+          );
+          process.exitCode = 1;
+        }
+        return;
       }
-    }
-  });
+
+      // Interactive path: original 6-digit code flow.
+      const pairing = new PairingService(cfg, secrets, api);
+      if (pairing.isPaired()) {
+        process.stderr.write(
+          "Runner is already paired. Run `jadapps-runner unpair` first.\n",
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      const { code, deepLink } = await pairing.beginPairing(opts.name);
+      process.stdout.write(
+        `\nPairing code:  ${code}\n` +
+          `Open this link while signed in to confirm:\n  ${deepLink}\n` +
+          `\nWaiting for confirmation${opts.poll ? "" : " (skipped, --no-poll)"}…\n`,
+      );
+
+      if (opts.poll) {
+        try {
+          const id = await pairing.pollPairing();
+          process.stdout.write(`\nPaired. deviceId=${id.deviceId} userId=${id.userId}\n`);
+        } catch (err) {
+          process.stderr.write(`\nPairing failed: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
+      }
+    },
+  );
 
 program
   .command("oauth2 <providerName> <ref>")

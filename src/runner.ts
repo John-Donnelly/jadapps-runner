@@ -1,8 +1,11 @@
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig, paths } from "./config.js";
 import { createLogger } from "./log.js";
 import { SecretStore } from "./auth/keychain.js";
 import { ApiClient } from "./api/client.js";
 import { PairingService } from "./auth/pairing.js";
+import { PreauthRedeemer } from "./auth/preauth.js";
 import { TokenManager } from "./auth/tokens.js";
 import { LicenseManager } from "./auth/license.js";
 import { CredentialStore } from "./credentials/store.js";
@@ -61,6 +64,14 @@ export async function startRunner(): Promise<Runner> {
 
   const secrets = new SecretStore(cfg.dataDir);
   const api = new ApiClient(cfg.apiBase, log);
+
+  // Phase A: silent first-launch pairing. If a preauth token is sitting
+  // in the env or as a marker file dropped by the installer/protocol
+  // handler, redeem it before we touch tokens/license — that way the
+  // tray icon goes from "Stopped" straight to "Running" without ever
+  // displaying "Not paired".
+  await maybeRedeemPreauth({ cfg, secrets, api, log });
+
   const pairing = new PairingService(cfg, secrets, api);
   const tokens = new TokenManager(api, pairing);
   const license = new LicenseManager(api, tokens, log);
@@ -211,6 +222,108 @@ export async function startRunner(): Promise<Runner> {
     license,
     rateLimiter,
   };
+}
+
+/**
+ * Look for a preauth token at boot and redeem it silently. Sources, in
+ * priority order:
+ *
+ *   1. `JADAPPS_PREAUTH_TOKEN` env var (set by the installer / protocol
+ *      handler before exec'ing the runner).
+ *   2. `<dataDir>/preauth.json` marker file with shape
+ *      `{ preauthToken, deviceName?, platformTag? }`. Companion-file
+ *      delivery path used when protocol activation isn't wired.
+ *
+ * The token is consumed on success — env var is unset for the rest of
+ * the process; marker file is deleted. Failures are logged but do NOT
+ * abort startup; the runner just stays unpaired and the user can pair
+ * later through the interactive flow.
+ */
+export async function maybeRedeemPreauth(deps: {
+  cfg: ReturnType<typeof loadConfig>;
+  secrets: SecretStore;
+  api: ApiClient;
+  log: ReturnType<typeof createLogger>;
+}): Promise<void> {
+  const markerPath = join(deps.cfg.dataDir, "preauth.json");
+  let source: "env" | "file" | null = null;
+  let token = (process.env.JADAPPS_PREAUTH_TOKEN ?? "").trim();
+  let deviceName: string | undefined;
+  let platformTag: string | undefined;
+
+  if (token) {
+    source = "env";
+  } else if (existsSync(markerPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(markerPath, "utf8")) as {
+        preauthToken?: unknown;
+        deviceName?: unknown;
+        platformTag?: unknown;
+      };
+      if (typeof parsed.preauthToken === "string" && parsed.preauthToken.trim()) {
+        token = parsed.preauthToken.trim();
+        source = "file";
+        if (typeof parsed.deviceName === "string") deviceName = parsed.deviceName;
+        if (typeof parsed.platformTag === "string") platformTag = parsed.platformTag;
+      }
+    } catch (err) {
+      deps.log.warn(
+        { err, markerPath },
+        "preauth marker file present but unparseable; ignoring",
+      );
+    }
+  }
+
+  if (!token || !source) return;
+
+  const redeemer = new PreauthRedeemer({
+    cfg: deps.cfg,
+    secrets: deps.secrets,
+    api: deps.api,
+    log: deps.log,
+  });
+
+  if (redeemer.isPaired()) {
+    deps.log.info(
+      { source },
+      "preauth token present but runner already paired; consuming token without redeeming",
+    );
+    consumePreauthSource(source, markerPath);
+    return;
+  }
+
+  try {
+    const opts: { deviceName?: string; platformTag?: string } = {};
+    if (deviceName) opts.deviceName = deviceName;
+    if (platformTag) opts.platformTag = platformTag;
+    const identity = await redeemer.redeem(token, opts);
+    deps.log.info(
+      { source, deviceId: identity.deviceId, userId: identity.userId },
+      "silently paired via preauth token",
+    );
+    consumePreauthSource(source, markerPath);
+  } catch (err) {
+    deps.log.error(
+      { err: (err as Error).message, source },
+      "preauth redemption failed; runner will start unpaired",
+    );
+    // Always consume the token so we don't retry a known-bad token on
+    // every restart. If the user wants to retry, they get a fresh token.
+    consumePreauthSource(source, markerPath);
+  }
+}
+
+function consumePreauthSource(source: "env" | "file", markerPath: string): void {
+  if (source === "env") {
+    delete process.env.JADAPPS_PREAUTH_TOKEN;
+    return;
+  }
+  try {
+    if (existsSync(markerPath)) unlinkSync(markerPath);
+  } catch {
+    // Best-effort; if we can't delete it the redeemer's isPaired() guard
+    // will refuse to redeem on the next boot anyway.
+  }
 }
 
 function makeShutdown(
