@@ -26,7 +26,7 @@ const root = join(__dirname, "..");
 const stage = join(
   root,
   "src-winui",
-  "JadAppsRunner",
+  "JadAppsRunner.Host",
   "Assets",
   "runtime-bundle",
 );
