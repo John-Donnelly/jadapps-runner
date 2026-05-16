@@ -78,6 +78,28 @@ interface PollPairResult {
   refreshToken: string;
 }
 
+/**
+ * Phase A: pre-authorized pairing. The signed-in website mints a one-time
+ * `preauthToken` via /api/runner/pair/preauth, then hands it to the freshly
+ * installed runner (via a custom URL protocol, env var, or marker file).
+ * The runner exchanges it here for the same identity payload that
+ * /api/runner/pair/poll returns when confirmed — collapsing the human
+ * confirmation loop into one signed call.
+ */
+export interface RedeemPreauthInput {
+  preauthToken: string;
+  publicKey: string;
+  deviceName: string;
+  /** Free-text platform tag: "win32-msix", "win32-tauri", "darwin", "linux". */
+  platform: string;
+}
+
+export interface RedeemPreauthResult {
+  deviceId: string;
+  userId: string;
+  refreshToken: string;
+}
+
 export class ApiClient {
   constructor(
     public readonly apiBase: string,
@@ -106,6 +128,30 @@ export class ApiClient {
       this.log.debug({ err }, "pair poll failed; will retry");
       return { confirmed: false, deviceId: "", userId: "", refreshToken: "" };
     }
+  }
+
+  /**
+   * Redeem a pre-auth pairing token. Unlike the interactive `pair/begin`
+   * + `pair/poll` dance, this is a single shot: the server already trusts
+   * the token (issued under the user's signed-in session), so it returns
+   * the device identity immediately. Errors propagate; callers should
+   * surface them to the user — there's no retry that will fix an invalid
+   * or expired preauth token.
+   */
+  async redeemPreauth(input: RedeemPreauthInput): Promise<RedeemPreauthResult> {
+    const res = (await this.post("/api/runner/pair/redeem", {
+      preauthToken: input.preauthToken,
+      publicKey: input.publicKey,
+      deviceName: input.deviceName,
+      platform: input.platform,
+    })) as RedeemPreauthResult;
+    if (!res.deviceId || !res.userId || !res.refreshToken) {
+      throw new ApiError(
+        502,
+        `pair/redeem returned incomplete payload: ${JSON.stringify(res)}`,
+      );
+    }
+    return res;
   }
 
   async exchangeToken(
