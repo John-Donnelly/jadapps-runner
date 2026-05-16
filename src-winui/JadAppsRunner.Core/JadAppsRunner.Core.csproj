@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Pure-BCL library that the WinUI3 Host project references. Kept on
+      .NET 8 (the WindowsAppSDK 1.5+ baseline) and free of any WinUI
+      / WinAppSDK / WinRT type so it compiles + tests with plain
+      `dotnet test` on any machine with the .NET 8 SDK.
+    -->
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>JadAppsRunner.Core</RootNamespace>
+    <AssemblyName>JadAppsRunner.Core</AssemblyName>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Ed25519 isn't in System.Security.Cryptography on .NET 8 (added
+      in .NET 9 as `Ed25519PublicKey` etc.). BouncyCastle is the
+      well-maintained alternative and keeps the wire format identical
+      to what the Node side produces via crypto.sign(null, ..., key).
+    -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+  </ItemGroup>
+
+</Project>

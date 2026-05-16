@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Single-project MSIX WinUI3 host. Requires the Windows App SDK
+      build tools — restore pulls Microsoft.WindowsAppSDK from NuGet
+      on first build.
+    -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>JadAppsRunner.Host</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>JadAppsRunner.Host</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250108002" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
+    <!--
+      Tray icon for WinUI3. H.NotifyIcon.WinUI is the de-facto choice
+      since WinUI3 doesn't ship a built-in NotifyIcon equivalent.
+    -->
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JadAppsRunner.Core\JadAppsRunner.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    Stage the Node sidecar bundle into Assets/runtime-bundle/ before
+    build. Mirrors the Tauri stager: dist/ + node_modules/ + node.exe.
+    Skipped during dotnet restore so first-time clones don't fail.
+  -->
+  <Target Name="StageRuntimeBundle" BeforeTargets="BeforeBuild"
+          Condition=" '$(MSBuildRuntimeType)' != 'Mono' AND '$(BuildingProject)' == 'true' AND '$(SkipNodeStage)' != 'true' ">
+    <Message Text="Staging Node runtime bundle into Assets/runtime-bundle/" Importance="high" />
+    <Exec Command="node ../../scripts/stage-winui-bundle.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="true" />
+  </Target>
+
+  <ItemGroup>
+    <Content Include="Assets\runtime-bundle\**\*"
+             Condition="Exists('Assets\runtime-bundle')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

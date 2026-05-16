@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap mp rescap">
+
+  <Identity
+    Name="JAD-Apps-Runner"
+    Publisher="CN=John Donnelly"
+    Version="0.1.0.0" />
+
+  <mp:PhoneIdentity
+    PhoneProductId="11111111-2222-3333-4444-555555555555"
+    PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+
+  <Properties>
+    <DisplayName>JAD Apps Runner</DisplayName>
+    <PublisherDisplayName>JAD Apps</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22000.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22000.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US"/>
+  </Resources>
+
+  <Applications>
+    <Application Id="App"
+      Executable="$targetnametoken$.exe"
+      EntryPoint="$targetentrypoint$">
+      <uap:VisualElements
+        DisplayName="JAD Apps Runner"
+        Description="Local execution runtime for JAD Apps. Pairs with jadapps.app and runs file-processing tools, connectors, and workflows on this machine."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!--
+          Custom URL protocol so the jadapps.app "Install Runner"
+          button can hand off a one-time preauth token via
+          jadapps-runner://pair?token=...
+        -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="jadapps-runner" DisplayName="JAD Apps Runner Pairing">
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+          </uap:Protocol>
+        </uap:Extension>
+
+        <!--
+          StartupTask so the runner launches at login. Mirrors the
+          Tauri tauri-plugin-autostart behaviour. User can disable from
+          Windows Settings → Apps → Startup.
+        -->
+        <uap:Extension Category="windows.startupTask" Executable="JadAppsRunner.Host.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap:StartupTask
+            TaskId="JadAppsRunnerStartup"
+            Enabled="true"
+            DisplayName="JAD Apps Runner" />
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+</Package>
